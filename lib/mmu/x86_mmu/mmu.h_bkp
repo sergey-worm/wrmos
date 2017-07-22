@@ -1,0 +1,346 @@
+#include "types.h"
+#include "processor.h"
+
+#if defined (Cfg_debug) && defined (USE_MMU_ASSERT)
+#  define mmu_assert assert
+#else
+#  define mmu_assert(expr)
+#endif
+
+#define MMU_ISALIGN(val, algn)  (!(val & (algn - 1)))
+
+enum
+{
+	L1_sz  = 0x400,    // l1 / page dirs,    table size in records
+	L2_sz  = 0x400,    // l2 / page entries, table size in records
+
+	NotCachable   = 0,
+	Cachable      = 1,
+
+	Mmu_write_back = 0,
+	Mmu_write_through = 1,
+
+	Mmu_acc_uno_kro = 0,
+	Mmu_acc_uno_krw = 1,
+	Mmu_acc_uro_kro = 2,
+	Mmu_acc_urw_krw = 3,
+	Mmu_acc_max     = 3,
+};
+
+inline bool _mmu_acc_user(int acc) { return acc == Mmu_acc_uro_kro  ||  acc == Mmu_acc_urw_krw; }
+inline bool _mmu_acc_wr(int acc)   { return acc == Mmu_acc_uno_krw  ||  acc == Mmu_acc_urw_krw; }
+inline int  _mmu_make_acc(bool user, bool wr) { return (user << 1) | wr; }
+
+
+struct L1_ptd_t
+{
+	union
+	{
+		struct
+		{
+			unsigned present    :  1;  // page is present in RAM
+			unsigned writeable  :  1;  // 0 -> read_only, 1 -> read_write
+			unsigned user       :  1;  // allow user access
+			unsigned cache_mode :  1;  // 0 -> write_back, 1 -> write_through
+			unsigned cache_off  :  1;  // disable cache
+			unsigned accessed   :  1;  // page was accessed for read or write
+			unsigned is_pte     :  1;  // must be 0 for PTD
+			unsigned pgsz       :  1;  // 0 -> 4kB, 1 -> 4 MB
+			unsigned ignored    :  4;  // may ose by OS for storage
+			unsigned addr       : 20;  // addr of l2 table
+		};
+		uint32_t raw;
+	};
+};
+
+struct L1_pte_t
+{
+	union
+	{
+		struct
+		{
+			unsigned present    :  1;  // page is present in RAM
+			unsigned writeable  :  1;  // 0 -> read_only, 1 -> read_write
+			unsigned user       :  1;  // allow user access
+			unsigned cache_mode :  1;  // 0 -> write_back, 1 -> write_through
+			unsigned cache_off  :  1;  // disable cache
+			unsigned accessed   :  1;  // page was accessed for read or write
+			unsigned dirty      :  1;  // 1 -> page has been written
+			unsigned is_pte     :  1;  // must be 1 for l1 PTE
+			unsigned global     :  1;  // 1 -> no TLB updating if CR3 is reset
+			unsigned ignored    :  3;  // may ose by OS for storage
+			unsigned pat        :  1;  // ???, use 0
+			unsigned addr_hi    :  4;  // bits [39..32] of address
+			unsigned _nulls     :  5;  // must be 0
+			unsigned addr_low   : 10;  // addr of l2 table
+		};
+		uint32_t raw;
+	};
+};
+
+struct L2_pte_t
+{
+	union
+	{
+		struct
+		{
+			unsigned present    :  1;  // page is present in RAM
+			unsigned writeable  :  1;  // 0 -> read_only, 1 -> read_write
+			unsigned user       :  1;  // allow user access
+			unsigned cache_mode :  1;  // 0 -> write_back, 1 -> write_through
+			unsigned cache_off  :  1;  // disable cache
+			unsigned accessed   :  1;  // page was accessed for read or write
+			unsigned dirty      :  1;  // 1 -> page has been written
+			unsigned pat        :  1;  // ???, use 0
+			unsigned global     :  1;  // 1 -> no TLB updating if CR3 is reset
+			unsigned _ignored   :  3;  // may ose by OS for storage
+			unsigned addr       : 20;  // addr of pahe
+		};
+		uint32_t raw;
+	};
+};
+
+//--------------------------------------------------------------------------------------------------
+//  Table cells
+//--------------------------------------------------------------------------------------------------
+// make ptd
+inline void mmu_set_ptd(unsigned level, word_t* cell, paddr_t tb)
+{
+	mmu_assert(level == 1);              // L1 only
+	mmu_assert(MMU_ISALIGN(tb, 0x1000)); // 4 kB aligned
+	if (level == 1)
+	{
+		L1_ptd_t ptd;
+		ptd.raw        = 0;
+		ptd.addr       = tb >> 12;
+		ptd.pgsz       = 0;  // 4kB
+		ptd.is_pte     = 0;  //
+		ptd.cache_off  = 0;  // enable for PTD
+		ptd.cache_mode = 0;  // 0 -> write_back, 1 -> write_through
+		ptd.user       = 1;  // allow user access for PTD
+		ptd.writeable  = 1;  // make writable for PTD
+		ptd.present    = 1;  //
+		*cell = ptd.raw;
+	}
+}
+
+// make pte
+inline void _mmu_set_l1_pte(word_t* cell, paddr_t pa, unsigned access, unsigned cachable)
+{
+	mmu_assert(MMU_ISALIGN(pa, 0x400000)); // 4 MB for L1 tables
+	mmu_assert(access <= Mmu_acc_max);
+	mmu_assert(cachable <= 1);
+	L1_pte_t pte;
+	pte.raw         = 0;
+	pte.addr_low    = pa >> 22;
+	pte._nulls      = 0;  // must be 0
+	pte.addr_hi     = 0;  // don't support >4GB yet
+	pte.pat         = 0;  // ???, use 0
+	pte.global      = 0;  //
+	pte.is_pte      = 1;  // must be 1 for l1 PTE
+	pte.dirty       = 0;  // 1 -> page has been written
+	pte.accessed    = 0;  // page was accessed for read or write
+	pte.cache_off   = !cachable;
+	pte.cache_mode  = 0;  // 0 -> write_back, 1 -> write_through
+	pte.user        = _mmu_acc_user(access);
+	pte.writeable   = _mmu_acc_wr(access);
+	pte.present     = 1;  //
+	*cell = pte.raw;
+}
+
+// make pte
+inline void _mmu_set_l2_pte(word_t* cell, paddr_t pa, unsigned access, unsigned cachable)
+{
+	mmu_assert(MMU_ISALIGN(pa, 0x1000)); // 4 kB for L2 tables
+	mmu_assert(access <= Mmu_acc_max);
+	mmu_assert(cachable <= 1);
+	L2_pte_t pte;
+	pte.raw         = 0;
+	pte.addr        = pa >> 12;
+	pte.global      = 0;  //
+	pte.pat         = 0;  // ???, use 0
+	pte.dirty       = 0;  // 1 -> page has been written
+	pte.accessed    = 0;  // page was accessed for read or write
+	pte.cache_off   = !cachable;
+	pte.cache_mode  = 0;  // 0 -> write_back, 1 -> write_through
+	pte.user        = _mmu_acc_user(access);
+	pte.writeable   = _mmu_acc_wr(access);
+	pte.present     = 1;  //
+	*cell = pte.raw;
+}
+
+// make pte
+inline void mmu_set_pte(unsigned level, word_t* cell, paddr_t pa, unsigned access, unsigned cachable)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		_mmu_set_l1_pte(cell, pa, access, cachable);
+	else
+	if (level == 2)
+		_mmu_set_l2_pte(cell, pa, access, cachable);
+}
+
+// make invalid cell
+inline void mmu_set_inv(unsigned level, word_t* cell)
+{
+	(void) level;
+	mmu_assert(level == 1  ||  level == 2);
+	*cell = 0;
+}
+
+// get paddr from ptd record
+inline paddr_t mmu_get_ptd_pa(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1);
+	mmu_assert(!((L1_ptd_t*)cell)->is_pte);
+	if (level == 1)
+		return ((L1_ptd_t*)cell)->addr << 12;
+	return -1;
+}
+
+// get paddr from pte record
+inline paddr_t mmu_get_pte_pa(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		return ((L1_pte_t*)cell)->addr_low << 22;
+	else
+	if (level == 2)
+		return ((L2_pte_t*)cell)->addr << 12;
+	return -1;
+}
+
+// get cachable attribute from pte record
+inline int mmu_get_pte_cached(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		return !((L1_pte_t*)cell)->cache_off;
+	else
+	if (level == 2)
+		return !((L2_pte_t*)cell)->cache_off;
+	return -1;
+}
+
+// get access attribute from pte record
+inline const char* mmu_get_pte_acc(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	int acc = 0;
+	if (level == 1)
+		acc = _mmu_make_acc(((L1_pte_t*)cell)->user, ((L1_pte_t*)cell)->writeable);
+	else
+	if (level == 2)
+		acc = _mmu_make_acc(((L2_pte_t*)cell)->user, ((L2_pte_t*)cell)->writeable);
+	switch (acc)
+	{
+		case Mmu_acc_uno_kro:    return "uno_kro";
+		case Mmu_acc_uno_krw:    return "uno_krw";
+		case Mmu_acc_uro_kro:    return "uno_krw";
+		case Mmu_acc_urw_krw:    return "urx_krw";
+	}
+	return "__unknown_mmu_access__";
+}
+
+// is cell ptd record
+inline bool mmu_is_ptd(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		return ((L1_pte_t*)cell)->present && !((L1_pte_t*)cell)->is_pte;
+	return 0;
+}
+
+// is cell pte record
+inline bool mmu_is_pte(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		return ((L1_pte_t*)cell)->present && ((L1_pte_t*)cell)->is_pte;
+	else
+	if (level == 2)
+		return ((L1_pte_t*)cell)->present; // l2 always pte
+	return 0;
+}
+
+// is cell invalid record
+inline bool mmu_is_inv(unsigned level, word_t* cell)
+{
+	mmu_assert(level == 1  ||  level == 2);
+	if (level == 1)
+		return !((L1_pte_t*)cell)->present;
+	else
+	if (level == 2)
+		return !((L2_pte_t*)cell)->present;
+	return 0;
+}
+//--------------------------------------------------------------------------------------------------
+//  ~ Table cells
+//--------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------
+inline void mmu_zero(word_t* tb, unsigned sz_bytes)
+{
+	mmu_assert(MMU_ISALIGN((addr_t)tb, 0x1000)  &&  sz_bytes == 0x1000); // l1 and l2
+	// try to use double instruction
+	uint64_t* ptr = (uint64_t*)(void*)tb;
+	unsigned sz = sz_bytes / sizeof(uint64_t);
+	for (unsigned i=0; i<sz; ++i)
+		ptr[i] = 0;
+}
+
+//--------------------------------------------------------------------------------------------------
+//  MMU registers access
+//--------------------------------------------------------------------------------------------------
+
+inline void mmu_root_table(word_t val)
+{
+	Proc::cr3(val); // asm volatile("mov %0, %%cr3" :: "r"(val));
+}
+
+inline void mmu_tlb_flush()
+{
+	// NOTE:  don't need after mmu_root_table()
+	Proc::cr3(Proc::cr3());
+}
+
+inline void mmu_enable_pse()
+{
+	Proc::cr4(Proc::cr4() | 0x10);       // enable PSE (page size extention) to use 4 MB
+}
+
+inline void mmu_enable_paging()
+{
+	Proc::cr0(Proc::cr0() | (1 << 31));
+}
+
+//--------------------------------------------------------------------------------------------------
+//  ~ MMU registers access
+//--------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Table helpers for temporary mapping in bootstrap.
+//--------------------------------------------------------------------------------------------------
+inline void mmu_l1tb_init(word_t* l1tb)
+{
+	mmu_assert(MMU_ISALIGN((word_t)l1tb, 0x1000));
+	mmu_zero(l1tb, 0x1000);
+}
+
+inline void mmu_l1tb_map(word_t* l1tb, addr_t va, paddr_t pa, unsigned access, unsigned cachable)
+{
+	mmu_assert(MMU_ISALIGN((word_t)l1tb, 0x1000));
+	mmu_assert(MMU_ISALIGN(va, 0x00400000)); // 1 MB for L1 page
+	mmu_assert(MMU_ISALIGN(pa, 0x00400000)); // 1 MB for L1 page
+	mmu_assert(access <= Mmu_acc_max);
+	mmu_assert(cachable <= 1);
+	mmu_set_pte(1, &l1tb[va >> 22], pa, access, cachable);
+}
+
+inline void mmu_l1tb_unmap(word_t* l1tb, addr_t va)
+{
+	mmu_assert(MMU_ISALIGN((word_t)l1tb, 0x1000));
+	mmu_assert(MMU_ISALIGN(va, 0x00400000)); // 16 MB for L1 page
+	mmu_set_inv(1, &l1tb[va >> 22]);
+}
+//--------------------------------------------------------------------------------------------------
+//  ~ Table helpers.
+//--------------------------------------------------------------------------------------------------

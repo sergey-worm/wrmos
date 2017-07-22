@@ -1,0 +1,22 @@
+# config for roottask
+# mmio devices
+DEVICES
+	#name     paddr        size        irq
+
+# named memory regions
+MEMORY
+	#name      sz      access  cached  contig
+
+# applications
+APPLICATIONS
+	{
+		name:         hello
+		short_name:   hell
+		file_path:    ramfs:/hello.elf
+		stack_size:   0x1000
+		threads_max:  3
+		prio_max:     100
+		devices:
+		memory:
+		args:         arg1=123, arg2=345
+	}
