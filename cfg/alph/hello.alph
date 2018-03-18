@@ -14,6 +14,7 @@ APPLICATIONS
 		short_name:   hell
 		file_path:    ramfs:/hello.elf
 		stack_size:   0x1000
+		aspaces_max:  1
 		threads_max:  3
 		prio_max:     100
 		devices:

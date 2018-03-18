@@ -6,7 +6,7 @@
 
 #include "mmu.h"
 #include "krn-config.h"
-#include "processor.h"
+#include "sys_proc.h"
 #include "bootstrap.h"
 #include "startup.h"
 

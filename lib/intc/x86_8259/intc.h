@@ -8,9 +8,9 @@
 #define INTC_H
 
 #include <stdint.h>
-#include "processor.h"
+#include "sys_proc.h"
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint

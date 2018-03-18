@@ -5,7 +5,7 @@
 //##################################################################################################
 
 #include "wrm_slock.h"
-#include "l4api.h"
+#include "l4_api.h"
 #include <unistd.h>
 
 // set 0xff to spinlock address and return old value

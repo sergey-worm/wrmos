@@ -5,8 +5,8 @@
 //##################################################################################################
 
 #include "arch.h"
-#include "stack.h"
-#include "processor.h"
+#include "sys_stack.h"
+#include "sys_proc.h"
 #include "../x86/x86_common.h"
 
 // data for x86 video output (video.h)

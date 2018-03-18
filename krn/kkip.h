@@ -4,6 +4,11 @@
 //
 //##################################################################################################
 
-#include "kip.h"
+#ifndef KKIP_H
+#define KKIP_H
+
+#include "l4_kip.h"
 
 L4_kip_t* get_kip();
+
+#endif // KKIP_H

@@ -6,73 +6,27 @@
 
 #include "syscalls.h"
 #include "threads.h"
-#include "l4syscalls.h"
 #include "kuart.h"
+#include "l4_syscalls.h"
 
 
 void process_pfault(Thread_t* fault_thr, word_t fault_addr, word_t fault_access, word_t fault_inst);
 
-//
-inline void store_phys_word(word_t val, addr_t pa)
-{
-	#if defined(Cfg_arch_sparc)
-	enum { Asi_mmu_bypass = 0x1c }; // MMU only: MMU and cache bypass
-	sta(val, pa, Asi_mmu_bypass);
-	#elif defined(Cfg_arch_arm)
-	(void)val;
-	(void)pa;
-	assert(false);
-	#elif defined Cfg_arch_x86
-	(void)val;
-	(void)pa;
-	assert(false);
-	#elif defined Cfg_arch_x86_64
-	(void)val;
-	(void)pa;
-	assert(false);
-	#else
-	# error unsupported arch
-	#endif
-}
-
-//
-inline word_t load_phys_word(addr_t pa)
-{
-	#if defined(Cfg_arch_sparc)
-	enum { Asi_mmu_bypass = 0x1c }; // MMU only: MMU and cache bypass
-	return lda(pa, Asi_mmu_bypass);
-	#elif defined(Cfg_arch_arm)
-	(void)pa;
-	assert(false);
-	return -1;
-	#elif defined Cfg_arch_x86
-	(void)pa;
-	assert(false);
-	return -1;
-	#elif defined Cfg_arch_x86_64
-	(void)pa;
-	assert(false);
-	return -1;
-	#else
-	# error unsupported arch
-	#endif
-}
-
-//
+// use if processor support phys copying
 inline void store_phys_byte(uint8_t val, addr_t pa)
 {
 	addr_t aligned_pa = align_down(pa, sizeof(word_t));
-	word_t word = load_phys_word(aligned_pa);
+	word_t word = Proc::load_phys_word(aligned_pa);
 	uint8_t* ptr = (uint8_t*) &word;
 	ptr[pa - aligned_pa] = val;
-	store_phys_word(word, aligned_pa);
+	Proc::store_phys_word(word, aligned_pa);
 }
 
-//
+// use if processor support phys copying
 inline uint8_t load_phys_byte(addr_t pa)
 {
 	addr_t aligned_pa = align_down(pa, sizeof(word_t));
-	word_t word = load_phys_word(aligned_pa);
+	word_t word = Proc::load_phys_word(aligned_pa);
 	uint8_t* ptr = (uint8_t*) &word;
 	return ptr[pa - aligned_pa];
 }
@@ -80,36 +34,58 @@ inline uint8_t load_phys_byte(addr_t pa)
 // src, dst and len may be not aligned by sizeof(word_t)
 static void memcpy_phys_dst(addr_t src, addr_t dst_pa, size_t len)
 {
-	printk("%s:  src=0x%x, dst_pa=0x%x, len=0x%x.\n", __func__, src, dst_pa, len);
+	printk("%s:  src=0x%lx, dst_pa=0x%lx, len=0x%zx.\n", __func__, src, dst_pa, len);
 	size_t wordsz = sizeof(word_t);
-	if (is_aligned(src, wordsz) && is_aligned(dst_pa, wordsz) && is_aligned(len, wordsz))
+
+	if (Proc::is_phys_copy_supported())
 	{
-		for (unsigned i=0; i<len; i+=sizeof(word_t))
-			store_phys_word(*(word_t*)(src+i), dst_pa + i);
+		if (is_aligned(src, wordsz) && is_aligned(dst_pa, wordsz) && is_aligned(len, wordsz))
+		{
+			for (unsigned i=0; i<len; i+=sizeof(word_t))
+				Proc::store_phys_word(*(word_t*)(src+i), dst_pa + i);
+		}
+		else
+		{
+			// TODO:  may to optimize fore some cases of alignment
+			for (unsigned i=0; i<len; i++)
+				store_phys_byte(*(uint8_t*)(src+i), dst_pa + i);
+		}
 	}
 	else
 	{
-		// TODO:  may to optimize fore some cases of alignment
-		for (unsigned i=0; i<len; i++)
-			store_phys_byte(*(uint8_t*)(src+i), dst_pa + i);
+		// alloc kspace, map dst_pa to it, copy, unmap, free kspace
+		size_t sz = round_pg_up(dst_pa + len) - round_pg_down(dst_pa);
+		addr_t kva = Aspace::alloc_kspace(sz);
+		Sched_t::current()->task()->map(kva, round_pg_down(dst_pa), sz, Acc_kdata, Cachable);
+		memcpy((void*)(kva + get_pg_offset(dst_pa)), (const void*)src, len);
+		Sched_t::current()->task()->unmap(kva, sz);
+		Aspace::free_kspace(kva, sz);
 	}
 }
 
 // src, dst and len may be not aligned by sizeof(word_t)
 static void memcpy_phys_src(addr_t src_pa, addr_t dst, size_t len)
 {
-	printk("%s:  src_pa=0x%x, dst=0x%x, len=0x%x.\n", __func__, src_pa, dst, len);
+	printk("%s:  src_pa=0x%lx, dst=0x%lx, len=0x%zx.\n", __func__, src_pa, dst, len);
 	size_t wordsz = sizeof(word_t);
-	if (is_aligned(src_pa, wordsz) && is_aligned(dst, wordsz) && is_aligned(len, wordsz))
+	if (Proc::is_phys_copy_supported())
 	{
-		for (unsigned i=0; i<len; i+=sizeof(word_t))
-			*(word_t*)(dst+i) = load_phys_word(src_pa + i);
+		if (is_aligned(src_pa, wordsz) && is_aligned(dst, wordsz) && is_aligned(len, wordsz))
+		{
+			for (unsigned i=0; i<len; i+=sizeof(word_t))
+				*(word_t*)(dst+i) = Proc::load_phys_word(src_pa + i);
+		}
+		else
+		{
+			// TODO:  may to optimize fore some cases of alignment
+			for (unsigned i=0; i<len; i++)
+				*(uint8_t*)(dst+i) = load_phys_byte(src_pa + i);
+		}
 	}
 	else
 	{
-		// TODO:  may to optimize fore some cases of alignment
-		for (unsigned i=0; i<len; i++)
-			*(uint8_t*)(dst+i) = load_phys_byte(src_pa + i);
+		// make like in memcpy_phys_dst(), but use Acc_krodata
+		panic("%s: IMPLME", __func__);
 	}
 }
 
@@ -117,7 +93,7 @@ static void memcpy_phys_src(addr_t src_pa, addr_t dst, size_t len)
 // 'src', 'dst' and 'len' may be not aligned by sizeof(word_t)
 static void copy_thread_buf(addr_t src, addr_t dst, size_t len, const Thread_t* snd, const Thread_t* rcv)
 {
-	printk("%s:  src=0x%x, dst=0x%x, len=0x%x.\n", __func__, src, dst, len);
+	printk("%s:  src=0x%lx, dst=0x%lx, len=0x%zx.\n", __func__, src, dst, len);
 
 	if (!len)
 		return;
@@ -158,34 +134,34 @@ static void copy_thread_buf(addr_t src, addr_t dst, size_t len, const Thread_t* 
 }
 
 // parse all items, process it and copy to dest
-static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bool use_local_id)
+static int do_normal_ipc(Thread_t* snd, Thread_t* rcv, bool propagated, bool use_local_id)
 {
 	printk("do_ipc:  snd=%s (%s) --> rcv=%s (%s).\n",
-			snd->name(), snd->state_str(), rcv->name(), rcv->state_str());
+		snd->name(), snd->state_str(), rcv->name(), rcv->state_str());
 
-	//if (snd == rcv) return 0;  // XXX:  what does it mean ?  assert() ?
+	assert(snd != rcv);
 
 	//assert(snd->state() == Thread_t::Send_ipc);    // ?
 	//assert(rcv->state() == Thread_t::Receive_ipc); // ?
 
-	L4_utcb_t* sutcb = Sched_t::current()->task()==snd->task() ? snd->utcb() : snd->kutcb();
-	L4_utcb_t* rutcb = Sched_t::current()->task()==rcv->task() ? rcv->utcb() : rcv->kutcb();
+	L4_utcb_t* sutcb = snd->utcb();
+	L4_utcb_t* rutcb = rcv->utcb();
 	L4_msgtag_t tag = sutcb->msgtag();
 
 	//printk("++ %s() - msg:  label=%d/%d, u=%u, t=%d.\n", __func__,
 	//	tag.ipc_label(), tag.proto_label(), tag.untyped(), tag.typed());
 
 	// copy msg_tag and from_id to dest
-	rutcb->msgtag() = tag;
+	rutcb->mr[0] = tag.raw();
 	word_t real_sender = use_local_id ? snd->localid().raw() : snd->globid().raw();
 	if (propagated)
 	{
-		rcv->entry_frame()->scall_ipc_from(sutcb->sender().raw());  // from
-		rutcb->sender(real_sender);                                 // actual sender
+		rcv->entry_frame()->scall_ipc_from(sutcb->sender().raw());
+		rutcb->sender(real_sender);  // actual sender
 	}
 	else
 	{
-		rcv->entry_frame()->scall_ipc_from(real_sender);            // from
+		rcv->entry_frame()->scall_ipc_from(real_sender);
 	}
 
 	// untyped words - just copy to dest
@@ -218,8 +194,8 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 				L4_map_item_t* mitem = (L4_map_item_t*) item;
 				L4_fpage_t snd_fpage = mitem->fpage();
 
-				/**/printk("%s:  map/grant item, i=%u,  mr%d=0x%lx, mr%d=0x%lx, addr=0x%lx, sz=0x%lx, acc=%d.\n",
-				/**/	__func__, i, i, sutcb->mr[i], i+1, sutcb->mr[i+1],
+				/**/printk("map:  map/grant item, i=%u,  mr%d=0x%lx, mr%d=0x%lx, addr=0x%lx, sz=0x%lx, acc=%d.\n",
+				/**/	i, i, sutcb->mr[i], i+1, sutcb->mr[i+1],
 				/**/	snd_fpage.addr(), snd_fpage.size(), snd_fpage.access());
 
 				assert(!snd_fpage.is_complete());
@@ -232,13 +208,22 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 
 				if (!snd_fpage.is_nil())
 				{
-					int cached = snd->task()->cached(snd_fpage);
+					int cached = snd->task()->cached(snd_fpage);  // return <0 if alien fpage
 					if (cached < 0)
 					{
-						printf("Error:  attempt to map/grant alien fpage:\n");
-						snd->task()->dump();
-						panic("Attempt to map/grant alien fpage, IMPLEMENT ME.");
-						// TODO:  set error code and return
+						printk("map:  attempt to map/grant memory that is not mapped to current aspace.\n");
+						printk("map:  send pfault to sender.pager.\n");
+
+						// send pfault request to snd->pager
+						process_pfault(snd, snd_fpage.addr(), snd_fpage.access(), snd_fpage.addr());
+
+						cached = snd->task()->cached(snd_fpage);  // try again
+						if (cached < 0)
+						{
+							snd->task()->dump();
+							panic("map:  attempt to map/grant alien fpage, IMPLEMENT ME.");
+							// TODO:  set error code and return
+						}
 					}
 
 					/*
@@ -246,7 +231,7 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 					if (!snd->task()->is_inside_acc(snd_fpage))
 					{
 						snd->task()->dump();
-						panic("[krn]  attempt to map/grant alien fpage, IMPLEMENT ME.");
+						panic("attempt to map/grant alien fpage, IMPLEMENT ME.");
 						// TODO:  set error code and return
 					}
 					*/
@@ -280,8 +265,8 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 					else // use acceptor.rcv_window
 					{
 						if (acceptor.size() != snd_fpage.size())
-							panic("Rcv.acceptor.sz != snd_fpage.sz, snd=[%#x - 0x%#x), "
-							      "acceptor=[%#x - 0x%#x), IMPLEMENT ME.",
+							panic("Rcv.acceptor.sz != snd_fpage.sz, snd=[%#lx - 0x%#lx), "
+							      "acceptor=[%#lx - 0x%#lx), IMPLEMENT ME.",
 								snd_fpage.addr(), snd_fpage.end(), acceptor.addr(), acceptor.end());
 
 						src_va = snd_fpage.addr();
@@ -366,10 +351,11 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 							sitem->length(), bitem.length());
 
 						// sender anf receiver will get MsgOverflow error
-						sutcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, Ipc_overflow, bytes_copied));
-						rutcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, Ipc_overflow, bytes_copied));
-						sutcb->msgtag().ipc_set_failed();
-						rutcb->msgtag().ipc_set_failed();
+						sutcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, L4_ipc_overflow, bytes_copied));
+						rutcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, L4_ipc_overflow, bytes_copied));
+						tag.ipc_set_failed();
+						sutcb->mr[0] = tag.raw();
+						rutcb->mr[0] = tag.raw();
 						return 0;
 					}
 				}
@@ -401,66 +387,115 @@ static int do_normal_ipc(const Thread_t* snd, Thread_t* rcv, bool propagated, bo
 	return 0;
 }
 
-// print all string items via kernel console
-static void print_string_items(L4_utcb_t* utcb)
+void do_pfault_ipc(const Thread_t* snd, Thread_t* rcv, word_t fault_addr, word_t fault_access, word_t fault_inst)
 {
-	enum { Msg_regs = 30 };
+	printk("do_pf_ipc:  snd=%s (%s) --> rcv=%s (%s).\n",
+		snd->name(), snd->state_str(), rcv->name(), rcv->state_str());
 
-	L4_msgtag_t tag = utcb->msgtag();
-	unsigned first_reg = tag.untyped() + 1;
-	unsigned last_reg = tag.untyped() + tag.typed();
+	assert(snd != rcv);
 
-	for (unsigned i=first_reg; i<=last_reg; )
+	//L4_utcb_t* sutcb = snd->utcb();
+	L4_utcb_t* rutcb = rcv->utcb();
+
+	L4_msgtag_t tag;
+	tag.proto_label(L4_msgtag_t::Pagefault);
+	tag.propagated(0);
+	tag.pfault_access(fault_access);
+	tag.untyped(2);
+	tag.typed(0);
+	rutcb->mr[0] = tag.raw();
+	rutcb->mr[1] = fault_addr;
+	rutcb->mr[2] = fault_inst;
+	rcv->entry_frame()->scall_ipc_from(snd->globid().raw());
+}
+
+void do_exc_ipc(const Thread_t* snd, Thread_t* rcv, int exc_type, word_t pfault_addr_and_acc)
+{
+	printk("do_exc_ipc:  snd=%s (%s) --> rcv=%s (%s).\n",
+		snd->name(), snd->state_str(), rcv->name(), rcv->state_str());
+
+	assert(snd != rcv);
+
+	L4_utcb_t* rutcb = rcv->utcb();
+
+	L4_msgtag_t tag;
+	tag.proto_label(exc_type);
+	tag.propagated(0);
+	tag.untyped(1 + sizeof(Entry_frame_t)/sizeof(word_t));
+	tag.typed(0);
+	rutcb->mr[0] = tag.raw();
+	rutcb->mr[1] = pfault_addr_and_acc;
+	memcpy(&rutcb->mr[2], snd->entry_frame(), sizeof(Entry_frame_t));
+	rcv->entry_frame()->scall_ipc_from(snd->globid().raw());
+}
+
+// send pf-msg from fault_thr to its pager
+void process_pfault(Thread_t* fault_thr, word_t fault_addr, word_t fault_access, word_t fault_inst)
+{
+	printk("pfault:  addr=0x%lx, access=%ld, inst=0x%lx.\n", fault_addr, fault_access, fault_inst);
+
+	Thread_t* pgr = fault_thr->pager();
+	if (!pgr)
+		panic("pagefault:  no pager.");
+
+	if (pgr->state() == Thread_t::Receive_ipc)
 	{
-		L4_typed_item_t* item = (L4_typed_item_t*) &utcb->mr[i];
-		if (i == last_reg)    // last msg reg but typed item have size >= 2
-		{
-			printk("ERROR:  wrong msg:  untyped=%u, typed=%u, first=%u, last=%u, cur=%u.\n",
-				tag.untyped(), tag.typed(), first_reg, last_reg, i);
-			assert(false && "Parse error:  not enough regs for typed items.");
-			break;
-		}
+		// send pf-msg
+ 		do_pfault_ipc(fault_thr, pgr, fault_addr, fault_access, fault_inst);
+		pgr->state(Thread_t::Ready);
+		fault_thr->pf_save(fault_addr, fault_access, fault_inst);
+		fault_thr->ipc_from_spec(pgr->globid());
+		fault_thr->state(Thread_t::Receive_pfault);
+		Sched_t::switch_to(pgr);
+	}
+	else
+	{
+		// wait
+		fault_thr->pf_save(fault_addr, fault_access, fault_inst);
+		fault_thr->ipc_to(pgr->globid());
+		fault_thr->state(Thread_t::Send_pfault);
+		Sched_t::switch_to_next();
+	}
+}
 
-		if (!item->is_string_item())
-		{
-			// skip map or grant item
-			i += sizeof(L4_map_item_t);
-			continue;
-		}
+// send pf-msg from fault_thr to its exc-handler
+void process_exception(Thread_t* fault_thr, int exc_type, word_t pfault_addr_and_acc)
+{
+	printk("exc:  inst=0x%lx.\n", fault_thr->entry_frame()->entry_pc());
 
-		L4_string_item_t* sitem = (L4_string_item_t*) item;
+	L4_thrid_t exhid = fault_thr->utcb()->exception_handler();
+	Thread_t* exh = Threads_t::find(exhid);
+	if (!exh || !exh->is_active())
+	{
+		if (!exh)
+			force_printk("exc:  ERROR:  exc-handler does not exist, exhid=%u.\n", exhid.number());
+		else
+			force_printk("exc:  ERROR:  exc-handler is not active, exhid=%u, state=%u.\n", exhid.number(), exh->state());
 
-		// print string items (simple or compound) one by one
-		unsigned num = sitem->substring_number();
-		for (unsigned j=0; j<num; ++j)
-		{
-			if (i+j > last_reg)
-			{
-				printk("ERROR:  sitem point out of msg:  untyped=%u, typed=%u, sitem_reg=%u, sstr_reg=%u.\n",
-					tag.untyped(), tag.typed(), i, i+j);
-				assert(false);
-				break;
-			}
-			Uart::putsn((char*)sitem->pointer(j), sitem->length());  // write uart
-			printf("%.*s", sitem->length(), (char*)sitem->pointer());       // write to log or console
-		}
-		i += num + 1;  // add sitem size
+		force_printk("exc:  use default exc-handler - roottask.\n");
+		exhid = thrid_roottask();
+		exh = Threads_t::find(exhid);
+		if (!exh)
+			panic("exc:  failed to find roottask thread");
+		//panic("exc:  no exception handler.");
+	}
 
-		if (!item->is_last()  &&  i > last_reg)
-		{
-			printk("ERROR:  wrong msg:  untyped=%u, typed=%u, first=%u, last=%u, cur=%u.\n",
-				tag.untyped(), tag.typed(), first_reg, last_reg, i);
-			assert(false && "Parse error:  regs is over but sitem is not last.");
-			break;
-		}
-
-		if (item->is_last()  &&  i != last_reg + 1)
-		{
-			printk("ERROR:  wrong msg:  untyped=%u, typed=%u, first=%u, last=%u, cur=%u.\n",
-				tag.untyped(), tag.typed(), first_reg, last_reg, i);
-			assert(false && "Parse error:  last sitem, but is not last reg.");
-			break;
-		}
+	if (exh->state() == Thread_t::Receive_ipc)
+	{
+		// send exception msg
+		do_exc_ipc(fault_thr, exh, exc_type, pfault_addr_and_acc);
+		exh->state(Thread_t::Ready);
+		fault_thr->ipc_from_spec(exh->globid());
+		fault_thr->state(Thread_t::Receive_exception);
+		Sched_t::switch_to(exh);
+	}
+	else
+	{
+		// wait
+		fault_thr->exc_save(exc_type, pfault_addr_and_acc);
+		fault_thr->ipc_to(exh->globid());
+		fault_thr->state(Thread_t::Send_exception);
+		Sched_t::switch_to_next();
 	}
 }
 
@@ -469,33 +504,17 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 	L4_thrid_t    to        = eframe.scall_ipc_to();
 	L4_thrid_t    from_spec = eframe.scall_ipc_from_spec();
 	L4_timeouts_t timeouts  = eframe.scall_ipc_timeouts();
-	L4_utcb_t*    utcb      = cur.utcb();
-	L4_msgtag_t&  tag       = utcb->msgtag();
+	L4_utcb_t*    utcb      = cur.uutcb();
+	L4_msgtag_t   tag       = utcb->msgtag();
 
-	// extention - ipc to Any means ipc to kernel
-	if (to.is_any())
-	{
-		if (tag.ipc_label() == 0x201) // TODO:  do enum
-		{
-			// TODO:  may be if started up System_uart_app --> route msgs to it
-			print_string_items(utcb);
-			tag.ipc_set_ok();
-		}
-		else
-		{
-			printk("ipc:  ERROR:  unsupported tag.label=0x%x for kernel destination, tag.raw=0x%x.\n",
-				tag.ipc_label(), tag.raw());
-			utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, Ipc_no_partner));
-			tag.ipc_set_failed();
-		}
-		return;
-	}
-
-	printk("ipc entry:  snd=%d, rcv=%d, p=%d, u=%d, t=%d.\n", to.number(), from_spec.number(),
-			tag.propagated(), tag.untyped(), tag.typed());
+	printk("ipc entry:  snd=%d, rcv=%d, p=%d, u=%d, t=%d.\n", to.number(),
+		from_spec.is_any() ? -1 : from_spec.number(), tag.propagated(), tag.untyped(), tag.typed());
 
 	Thread_t* snd_partner = 0;
 	Thread_t* rcv_partner = 0;
+
+	tag.ipc_set_ok();
+	utcb->mr[0] = tag.raw();
 
 	// send phase
 	if (!to.is_nil())
@@ -509,14 +528,27 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 			if (!ithr  ||  cur.globid() != ithr->handler())
 			{
 				printk("ipc:  ERROR:  wrong irq or sender is not handler of interrupt thread.\n");
-				utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, Ipc_no_partner));
+				utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, L4_ipc_no_partner));
 				tag.ipc_set_failed();
+				utcb->mr[0] = tag.raw();
 				return;
 			}
+
 			printk("ipc:  re-enable interrupt %u.\n", irq);
 			if (flags & 0x1)  // flags:  is need clear befor unmask ?
 				Intc::clear(irq);
-			Intc::unmask(irq);
+
+			if (Intc::is_pending(irq))
+			{
+				// already pending
+				Intc::clear(irq);
+				Threads_t::int_thread(irq)->pending(true);
+			}
+			else
+			{
+				// wait
+				Intc::unmask(irq);
+			}
 		}
 		else
 		{
@@ -524,12 +556,13 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 			if (!dst || !dst->is_active())
 			{
 				if (!dst)
-					force_printk("ipc:  ERROR:  dest does not exist, dest_thr_id=0x%x/%u.\n", to.raw(), to.number());
+					force_printk("ipc:  ERROR:  dest does not exist, dest_thr_id=%u.\n", to.number());
 				else
-					force_printk("ipc:  ERROR:  dest is not active, dest_thr_id=0x%x, state=%u.\n", to.raw(), dst->state());
+					force_printk("ipc:  ERROR:  dest is not active, dest_thr_id=%u, state=%u.\n", to.number(), dst->state());
 
-				utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, Ipc_no_partner));
+				utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, L4_ipc_no_partner));
 				tag.ipc_set_failed();
+				utcb->mr[0] = tag.raw();
 				return;
 			}
 
@@ -543,11 +576,7 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 					dst->task()->name((char*)&utcb->mr[3], sizeof(word_t));
 				}
 				dst->start(utcb->mr[1], utcb->mr[2]);
-				#if 1
 				snd_partner = dst;
-				#else
-				Sched_t::switch_to(dst);  // start immediatly
-				#endif
 			}
 			else if (tag.is_pf_request())
 			{
@@ -559,7 +588,7 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 			{
 				printk("pf_reply:  dst:  name=%s, state=%s.\n", dst->name(), dst->state_str());
 
-				// check that one typed item is map or grant
+				// check that typed item is map or grant
 				assert(((const L4_typed_item_t*)&utcb->mr[1])->is_map_item() ||
 			    	   ((const L4_typed_item_t*)&utcb->mr[1])->is_grant_item());
 
@@ -567,56 +596,83 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				L4_map_item_t* item = (L4_map_item_t*) &utcb->mr[1];
 				L4_fpage_t fpage = item->fpage();
 
-				printk("pf_reply:  cur:  name=%s, state=%s, task=0x%x.\n", cur.name(), cur.state_str(), cur.task());
-				printk("pf_reply:  pg:   addr=0x%x, sz=0x%x, acc=%d.\n", fpage.addr(), fpage.size(), fpage.access());
+				printk("pf_reply:  cur:  name=%s, state=%s, task=0x%p.\n", cur.name(), cur.state_str(), cur.task());
+				printk("pf_reply:  pg:   addr=0x%lx, sz=0x%lx, acc=%d.\n", fpage.addr(), fpage.size(), fpage.access());
 
-				if (!cur.task()->is_inside_acc(fpage))
+				// wrm extention:  if fpage is complete - raise exception
+				if (fpage.is_complete())
 				{
-					printk("pf_reply:  attempt to map/grant memory that is not mapped to current aspace.\n");
-
-					// send pfault request to current->pager
-					process_pfault(&cur, fpage.addr(), fpage.access(), fpage.addr());
-
+					printk("pf_reply:  pager was unable to process pfault request - raise exception.\n");
+					process_exception(dst, L4_msgtag_t::Mmu_exception, dst->pf_addr() | dst->pf_access());
+				}
+				// if fpage is not nil - do mapping and resume dst thread
+				else if (!fpage.is_nil())
+				{
 					if (!cur.task()->is_inside_acc(fpage))
 					{
-						cur.task()->dump();
-						panic("pf:  attempt to map/grant alien fpage, IMPLEMENT ME.");
-						// TODO:  set error code and return
+						printk("pf_reply:  attempt to map/grant memory that is not mapped to current aspace.\n");
+
+						// send pfault request to current->pager
+						process_pfault(&cur, fpage.addr(), fpage.access(), fpage.addr());
+
+						if (!cur.task()->is_inside_acc(fpage))
+						{
+							cur.task()->dump();
+							panic("pf:  attempt to map/grant alien fpage, IMPLEMENT ME.");
+							// TODO:  set error code and return
+						}
 					}
+
+					paddr_t pa = cur.task()->walk(fpage.addr(), fpage.size());
+					//if (!pa || (cur.id()==1 && pa != fpage.addr()))
+					//	cur.task()->dump();
+					assert(pa);
+					assert(cur.id() != 1/*sigma0*/  ||  pa == fpage.addr());
+					addr_t va = round_down(dst->pf_addr(), Cfg_page_sz);
+
+					dst->task()->map(va, pa, fpage.size(), Aspace::uacc2acc(fpage.access()), Cachable);
+
+					if (item->is_grant())
+						dst->task()->unmap(fpage.addr(), fpage.size());
+
+					dst->state(Thread_t::Ready);
+					snd_partner = dst;
+					assert(dst->prio_heir().is_nil());
 				}
-
-				paddr_t pa = cur.task()->walk(fpage.addr(), fpage.size());
-				//if (!pa || (cur.id()==1 && pa != fpage.addr()))
-				//	cur.task()->dump();
-				assert(pa);
-				assert(cur.id() != 1/*sigma0*/  || pa == fpage.addr());
-				addr_t va = round_down(dst->pf_addr(), Cfg_page_sz);
-
-				dst->task()->map(va, pa, fpage.size(), Aspace::uacc2acc(fpage.access()), Cachable);
-
-				if (item->is_grant())
-					dst->task()->unmap(fpage.addr(), fpage.size());
-
+				// fpage is nil - skip mapping and just resume dst thread
+				else
+				{
+					assert(fpage.is_nil());
+					dst->state(Thread_t::Ready);
+					snd_partner = dst;
+					assert(dst->prio_heir().is_nil());
+				}
+			}
+			// TODO:  check that msg from exc-handler
+			else if (dst->state() == Thread_t::Receive_exception  &&  tag.is_exc_reply())
+			{
+				printk("exc_reply:  dst:  name=%s, state=%s.\n", dst->name(), dst->state_str());
+				//dst->entry_frame()->entry_pc(utcb->mr[1]);
+				memcpy(dst->entry_frame(), &utcb->mr[2], sizeof(Entry_frame_t));
 				dst->state(Thread_t::Ready);
 				snd_partner = dst;
-
 				assert(dst->prio_heir().is_nil());
 			}
-			// extention - trigger software irq
+			// wrm extention - trigger software irq
 			else if (tag.ipc_label() == 0x202)
 			{
 				printk("ipc:  trigger sw irq for dst=%u.\n", dst->globid().number());
 				assert(&cur != dst);
 				if (dst->state() == Thread_t::Receive_ipc  &&  dst->ipc_from_spec() == dst->globid())
 				{
-					dst->entry_frame()->scall_ipc_from(dst->globid().raw());  // from
+					dst->entry_frame()->scall_ipc_from(dst->globid().raw());
 					// TODO:  may to set ipc_label
 					dst->state(Thread_t::Ready);
 					snd_partner = dst;
 				}
 				else
 				{
-					dst->sw_irq_pending(true);
+					dst->signal_pending(true);
 				}
 			}
 			else // normal ipc message
@@ -626,8 +682,7 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				bool propagated = false;
 				if (tag.propagated())
 				{
-					printk("ipc:  propagate:  to=0x%x/%u, virt_sender=0x%x/%u.\n",
-						to.raw(), to.number(), utcb->sender().raw(), utcb->sender().number());
+					printk("ipc:  propagate:  to=%u, virt_sender=%u.\n", to.number(), utcb->sender().number());
 
 					Thread_t* virt_sender = Threads_t::find(utcb->sender());
 
@@ -654,18 +709,9 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 					int rc = do_normal_ipc(&cur, dst, propagated, use_local_id);
 					if (!rc)
 					{
-						dst->state(Thread_t::Ready);
+						if (dst->state() != Thread_t::Ready) // dst may become Ready inside do_normal_ipc()
+							dst->state(Thread_t::Ready);
 						snd_partner = dst;
-
-						// remove inherited prio
-						/*delme*/printk("ipc:  snd:  dst_heir=%u, cur=%u.\n", dst->prio_heir().number(), cur.globid().number());
-						if (!dst->prio_heir().is_nil())
-						{
-							Thread_t* thr = threads_find(dst->prio_heir());
-							assert(thr);
-							thr->inherit_prio_del(dst->globid(), dst->prio_max());
-							dst->prio_heir(L4_thrid_t::Nil);
-						}
 					}
 					else
 					{
@@ -676,8 +722,9 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				// receiver is not ready for ipc, zero timeout
 				else if (timeouts.snd().is_zero())
 				{
-					utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, Ipc_timeout));
+					utcb->ipc_error_code(L4_ipcerr_t(L4_snd_phase, L4_ipc_timeout));
 					tag.ipc_set_failed();
+					utcb->mr[0] = tag.raw();
 					return;
 				}
 				// receiver is not ready for ipc, wait
@@ -699,25 +746,27 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 	}
 
 	// receive phase
-	if (!from_spec.is_nil())
+	if (!from_spec.is_nil()  &&  !utcb->msgtag().ipc_is_failed())
 	{
 		// extention - receive software irq
 		if (from_spec == cur.globid()  &&  tag.ipc_label() == 0x202) // NOTE:  label for rcv!
 		{
 			printk("ipc:  wait sw irq.\n");
-			if (cur.sw_irq_pending())
+			if (cur.signal_pending())
 			{
-				cur.entry_frame()->scall_ipc_from(cur.globid().raw());  // from
-				cur.sw_irq_pending(false);
+				cur.entry_frame()->scall_ipc_from(cur.globid().raw());
+				cur.signal_pending(false);
 			}
 			else if (timeouts.rcv().is_zero())
 			{
-				utcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, Ipc_timeout));
+				utcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, L4_ipc_timeout));
 				tag.ipc_set_failed();
+				utcb->mr[0] = tag.raw();
 			}
 			else
 			{
-				cur.save_rcv_phase(timeouts.rcv(), from_spec); // wait
+				// wait
+				cur.save_rcv_phase(timeouts.rcv(), from_spec);
 				Sched_t::switch_to_next();
 				snd_partner = 0;
 			}
@@ -731,11 +780,13 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				Int_thread_t* isnd = Threads_t::find_int_sender(cur, from_spec);
 				if (isnd)
 				{
-					utcb->msgtag().proto_label(L4_msgtag_t::Interrupt);
-					utcb->msgtag().proto_nulls();
-					utcb->msgtag().untyped(0);
-					utcb->msgtag().typed(0);
-					eframe.scall_ipc_from(isnd->globid().raw()); // from
+					// already pending
+					tag.proto_label(L4_msgtag_t::Interrupt);
+					tag.proto_nulls();
+					tag.untyped(0);
+					tag.typed(0);
+					utcb->mr[0] = tag.raw();
+					eframe.scall_ipc_from(isnd->globid().raw());
 					isnd->pending(false);
 				}
 				else
@@ -759,35 +810,27 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 					// sender was found
 					if (snd->state() == Thread_t::Send_pfault)
 					{
-						// send pagefault msg
-						utcb->msgtag().proto_label(L4_msgtag_t::Pagefault);
-						utcb->msgtag().pfault_access(snd->pf_access());
-						utcb->msgtag().untyped(2);
-						utcb->msgtag().typed(0);
-						utcb->mr[1] = snd->pf_addr();
-						utcb->mr[2] = snd->pf_inst();
-						eframe.scall_ipc_from(snd->globid().raw()); // from
-
+						// receive pagefault msg
+						do_pfault_ipc(snd, &cur, snd->pf_addr(), snd->pf_access(), snd->pf_inst());
 						snd->state(Thread_t::Receive_pfault);
+						rcv_partner = snd;
+					}
+					else if (snd->state() == Thread_t::Send_exception)
+					{
+						// receive exception msg
+						do_exc_ipc(snd, &cur, snd->exc_type(), snd->exc_pf());
+						snd->state(Thread_t::Receive_exception);
 						rcv_partner = snd;
 					}
 					else if (snd->state() == Thread_t::Send_ipc)
 					{
+						// receive normal ipc msg
 						int rc = do_normal_ipc(snd, &cur, propagated, use_local_id);
 						if (!rc)
 						{
-							snd->state(Thread_t::Ready);
+							if (snd->state() != Thread_t::Ready) // snd may become Ready inside do_normal_ipc()
+								snd->state(Thread_t::Ready);
 							rcv_partner = snd;
-
-							// remove inherited prio
-							/*delme*/printk("ipc:  rcv:  snd_heir=%u, cur=%u.\n", snd->prio_heir().number(), cur.globid().number());
-							if (!snd->prio_heir().is_nil())
-							{
-								Thread_t* thr = threads_find(snd->prio_heir());
-								assert(thr);
-								thr->inherit_prio_del(snd->globid(), snd->prio_max());
-								snd->prio_heir(L4_thrid_t::Nil);
-							}
 						}
 						else
 						{
@@ -804,8 +847,9 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				{
 					// sender not found and zero timeout
 					printk("ipc:  rcv:  ERROR:  no sender and timeout=0.\n");
-					utcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, Ipc_timeout));
+					utcb->ipc_error_code(L4_ipcerr_t(L4_rcv_phase, L4_ipc_timeout));
 					tag.ipc_set_failed();
+					utcb->mr[0] = tag.raw();
 				}
 				else
 				{
@@ -835,8 +879,8 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 		}
 	}
 
-	if (cur.state() != Thread_t::Ready)
-		cur.state(Thread_t::Ready);
+	assert(cur.state() == Thread_t::Ready);
+	assert(cur.prio() == cur.prio_max());
 
 	// switch to snd or rcv partner if need
 	if (snd_partner || rcv_partner)

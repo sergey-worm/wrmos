@@ -26,8 +26,8 @@ enum
 
 enum
 {
-	Wrm_sem_err_ok      =   0,
-	Wrm_sem_err_timeout = 100
+	Wrm_sem_err_ok      =  0,
+	Wrm_sem_err_timeout = 99
 };
 
 #ifndef __cplusplus

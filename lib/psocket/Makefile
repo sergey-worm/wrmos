@@ -16,7 +16,6 @@ baseflags  := -O2 -Wall -Werror
 baseflags  += -fno-builtin # don't use builtin printf()
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 #else
   baseflags += -DNDEBUG

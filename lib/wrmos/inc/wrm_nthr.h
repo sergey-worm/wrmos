@@ -7,7 +7,7 @@
 #ifndef WRM_NAMED_THREAD_H
 #define WRM_NAMED_THREAD_H
 
-#include "l4types.h"
+#include "l4_types.h"
 
 #ifdef __cplusplus
 extern "C" {

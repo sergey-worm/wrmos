@@ -22,10 +22,6 @@ void Thread_t::context_switch(Thread_t* next)
 	// set kernel entry stack pointer
 	arch_set_ksp(next->kentry_sp());
 
-	// check stack overflow
-	assert(check_canary());
-	assert(next->check_canary());
-
 	// switch aspace
 	if (task() != next->task())
 		next->task()->set_current();
@@ -33,7 +29,9 @@ void Thread_t::context_switch(Thread_t* next)
 	// time accounting
 	L4_clock_t now = SystemClock_t::sys_clock(__func__);
 	tmevent_suspend(now);
+	timeslice_stop(now);
 	next->tmevent_resume(now);
+	next->timeslice_start(now);
 
-	arch_switch_cpu(&this->_ksp, next->ksp(), (word_t)next->utcb());
+	arch_switch_cpu(&this->_ksp, next->ksp(), (word_t)next->uutcb());
 }

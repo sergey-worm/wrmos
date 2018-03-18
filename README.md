@@ -6,11 +6,11 @@ RTOS based on L4 microkernel.
 
 	WrmOS - RTOS based on L4 microkernel.
 
-	WrmOS incldes:
+	WrmOS includes:
 
 	* kernel       - mikrokernel based on "L4 kernel reference manual";
 	* applications - sigma0 (rootpager), alpha (roottask), tcpip, etc;
-	* libraries    - wlibc, wstds++, psockets, elfloader, etc.
+	* libraries    - wlibc, wstdc++, psockets, elfloader, etc.
 	* build system - based on config files and makefiles (dirs cfg/ and mk/);
 	* bootloader   - bootstrap the system, parse ramfs and load the kernel.
 

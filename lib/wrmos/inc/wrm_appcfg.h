@@ -7,7 +7,7 @@
 #ifndef WRM_APP_CFG_H
 #define WRM_APP_CFG_H
 
-#include "l4types.h"
+#include "l4_types.h"
 
 //#ifdef __cplusplus
 //extern "C" {
@@ -40,6 +40,7 @@ public:
 	char       short_name [App_short_name_sz];
 	char       filename [File_name_sz];
 	unsigned   stack_sz;                      // should be alligned to page size
+	uint8_t    max_aspaces;
 	uint8_t    max_threads;
 	uint8_t    max_prio;
 	uint8_t    fpu;

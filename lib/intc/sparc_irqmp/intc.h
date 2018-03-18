@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <assert.h>
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint

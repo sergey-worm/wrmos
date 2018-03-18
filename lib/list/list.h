@@ -18,35 +18,13 @@ typedef unsigned (*list_dprint_t)(const char* format, ...);
 
 #include <stdint.h>
 #include <stddef.h>
-#include "assert.h"
-#include "panic.h"
+#include "wlibc_assert.h"
+#include "wlibc_panic.h"
 
 // FIXME:
-typedef uintptr_t addr_t;
+typedef unsigned long addr_t;
 
-// iface for list-allocator
-class list_allocator_t
-{
-public:
-	virtual void* alloc() = 0;
-	virtual void free(addr_t va) = 0;
-};
-
-// default implementation of list-allocator
-class list_default_allocator_t : public list_allocator_t
-{
-public:
-
-	virtual void* alloc()
-	{
-		return 0;
-	}
-
-	virtual void free(addr_t va)
-	{
-		(void)va;
-	}
-};
+typedef void* (*list_malloc_t)(size_t sz_req, size_t* sz_rep);
 
 // Sorted dynamicaly allocated doubly linked list.
 // Memory is allocating by pages.
@@ -79,9 +57,9 @@ class list_t
 		inline void check(Item* pos) const
 		{
 		#ifdef DEBUG
-			assert(sz || (begin==0 && last==0));
-			assert(sz<=1 || begin!=last);
-			assert(sz>1 || begin==last);
+			wassert(sz || (begin==0 && last==0));
+			wassert(sz<=1 || begin!=last);
+			wassert(sz>1 || begin==last);
 
 			// check forward
 			unsigned cnt = 0;
@@ -95,9 +73,9 @@ class list_t
 				pos_in_list |= pos == item;
 				item = item->next;
 			}
-			assert(last == last_item);
-			assert(sz == cnt);
-			assert(pos_in_list || (!sz && !pos));
+			wassert(last == last_item);
+			wassert(sz == cnt);
+			wassert(pos_in_list || (!sz && !pos));
 
 			// check backward
 			cnt = 0;
@@ -111,9 +89,9 @@ class list_t
 				pos_in_list |= pos == item;
 				item = item->prev;
 			}
-			assert(begin == last_item);
-			assert(sz == cnt);
-			assert(pos_in_list || (!sz && !pos));
+			wassert(begin == last_item);
+			wassert(sz == cnt);
+			wassert(pos_in_list || (!sz && !pos));
 		#else
 			(void)pos;
 		#endif
@@ -123,7 +101,7 @@ class list_t
 		{
 			//print("    Xlist::%s:  before:  bgn=%x, lst=%x, sz=%u, itm=%x.\n", __func__, begin, last, sz, item);
 
-			assert(sz);
+			wassert(sz);
 			check(begin);
 
 			if (item->next)
@@ -201,8 +179,7 @@ class list_t
 	// data
 	list_dprint_t dprint;
 	const char* name;
-	list_allocator_t* allocator;
-	list_default_allocator_t default_allocator;
+	list_malloc_t malloc_func;
 	Xlist busy;
 	Xlist free;
 
@@ -216,7 +193,7 @@ private:
 
 		// address must be alligned to 8 byte, cause type 'T' may contain
 		// 64-bit data and access to them may be through double instructions
-		assert(!((addr_t)base & (sizeof(uint64_t) - 1)));
+		wassert(!((addr_t)base & (sizeof(uint64_t) - 1)));
 
 		addr_t addr = (addr_t)base;
 		size_t rest = sz;
@@ -233,11 +210,15 @@ private:
 	inline bool check_for_alloc()
 	{
 		if (!free.sz)
-			panic("list=%s is full, free=%u, busy=%u, N=%u, typesz=%u.\n",
-				name?name:"---", free.sz, busy.sz, N, sizeof(T));
-		assert(free.sz);
+		{
+			size_t sz = 0;
+			void* mem = malloc_func ? malloc_func(Item_size, &sz) : 0;
+			if (!mem)
+				panic("list=%s is full, free=%zu, busy=%zu, N=%zu, typesz=%zu, base_file=%s, malloc_func=%p.\n",
+					name?name:"---", free.sz, busy.sz, N, sizeof(T), __BASE_FILE__, malloc_func);
+			add_mem(mem, sz);
+		}
 		return free.sz;
-		// TODO:  allocator->alloc
 	}
 
 	void check_for_free()
@@ -312,7 +293,7 @@ public:
 	};
 
 	list_t(list_dprint_t dbg_print = List_no_dprint, const char* n = 0) :
-		dprint(dbg_print), name(n), allocator(&default_allocator)
+		dprint(dbg_print), name(n), malloc_func(0)
 	{
 		print("  List::%p::%s:  hello.\n", this, __func__);
 		add_mem(local_buf, sizeof(local_buf));
@@ -320,7 +301,7 @@ public:
 	}
 
 	list_t(void* mem, size_t sz, list_dprint_t dbg_print = List_no_dprint) :
-		dprint(dbg_print), allocator(&default_allocator)
+		dprint(dbg_print), malloc_func(0)
 	{
 		print("  List::%p::%s:  hello, mem=0x%x, sz=%u.\n", this, __func__, mem, sz);
 		add_mem(local_buf, sizeof(local_buf));
@@ -335,7 +316,7 @@ private:
 		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
 
 		dprint = dbg_print;
-		allocator = &default_allocator;
+		malloc_func = 0;
 		add_mem(local_buf, sizeof(local_buf));
 
 		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
@@ -346,6 +327,15 @@ public:
 	~list_t()
 	{
 		print("  List::%p::%s:  local_buf=0x%p.\n", this, __func__, local_buf);
+		if ((free.sz + busy.sz) != N)
+			panic("  List::%p::%s:  unsupported dtor() for allocated list:  name=%s, free=%zu, busy=%zu, N=%zu, typesz=%zu, base_file=%s.\n",
+				this, __func__, name?name:"---", free.sz, busy.sz, N, sizeof(T), __BASE_FILE__);
+
+	}
+
+	void set_allocator(list_malloc_t new_malloc)
+	{
+		malloc_func = new_malloc;
 	}
 
 	void add_memory(void* mem, size_t sz)
@@ -361,6 +351,7 @@ public:
 		if (!capacity())
 			init();  // no ctors was called --> initialize
 
+		malloc_func = right.malloc_func;
 		clear();
 		for (citer_t it=right.begin(); it!=right.end(); ++it)
 			push_back(*it);
@@ -476,7 +467,7 @@ public:
 	{
 		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
 
-		assert(busy.sz);
+		wassert(busy.sz);
 
 		Item* item = pos.item;
 		Item* ret = item->next;
@@ -500,10 +491,10 @@ public:
 		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
 	}
 
-	T& front() {  assert(busy.sz);  return busy.begin->data;  }
-	T& back()  {  assert(busy.sz);  return busy.last->data;   }
-	const T& front() const {  assert(busy.sz);  return busy.begin->data;  }
-	const T& back()  const {  assert(busy.sz);  return busy.last->data;   }
+	T& front() {  wassert(busy.sz);  return busy.begin->data;  }
+	T& back()  {  wassert(busy.sz);  return busy.last->data;   }
+	const T& front() const {  wassert(busy.sz);  return busy.begin->data;  }
+	const T& back()  const {  wassert(busy.sz);  return busy.last->data;   }
 };
 
 #endif // LIST_H

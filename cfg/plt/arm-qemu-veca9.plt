@@ -34,6 +34,7 @@ krn_tick_usec    = 10000
 krn_uart_paddr   = 0x10009000
 krn_uart_sz      = 0x100
 krn_uart_bitrate = 115200
+krn_uart_irq     = 12
 
 krn_intc_paddr   = 0x1e000000
 krn_intc_sz      = 0x2000

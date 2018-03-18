@@ -7,11 +7,12 @@
 #ifndef THREAD_H
 #define THREAD_H
 
-#include "entry_frame.h"
 #include "list.h"
-#include "l4types.h"
+#include "sys_eframe.h"
+#include "sys_stack.h"
+#include "l4_types.h"
+#include "l4_syscalls.h"
 #include "task.h"
-#include "stack.h"
 #include "sysclock.h"
 #include "thrid.h"
 #include "tmaccount.h"
@@ -69,13 +70,8 @@ class Thread_t
 {
 	enum
 	{
-		// sizes in words
-		Canary1_sz  = 32,          // minimum 16 words
-		Canary1_val = 0xdeadbeef,
-		Canary2_sz  = 32,
-		Canary2_val = 0xabadbabe,
-		Stack_sz    = 0x300,
-		Stack_val   = 0xa5a5a5a5,
+		Stack_32bit_val = 0xa5a5a5a5,
+		Stack_sz        = Cfg_page_sz,
 	};
 
 public:
@@ -91,17 +87,21 @@ public:
 
 	enum state_t
 	{
-		Idle           =            0,  // unused thread
-		Inactive       =            1,  // inactive thread
-		Active         =            2,  // active thread, start by receiving a starg_msg from pager
-		Ready          =            3,  // thread ready to execute
-		Send_ipc       = Snd_mask | 0,  // thread blocked in IpcSnd phase
-		Send_pfault    = Snd_mask | 1,  // thread blocked for send pf_msg to pager
-		Receive_ipc    = Rcv_mask | 0,  // thread blocked in IpcRcv phase
-		Receive_pfault = Rcv_mask | 1   // thread blocked for receive map/grant msg from pager
+		Idle              =            0,  // unused thread
+		Inactive          =            1,  // inactive thread
+		Active            =            2,  // active thread, start by receiving a starg_msg from pager
+		Ready             =            3,  // thread ready to execute
+		Send_ipc          = Snd_mask | 0,  // thread blocked in IpcSnd phase
+		Send_pfault       = Snd_mask | 1,  // thread blocked for send pfault_msg to pager
+		Send_exception    = Snd_mask | 2,  // thread blocked for send except_msg to exc-handler
+		Receive_ipc       = Rcv_mask | 0,  // thread blocked in IpcRcv phase
+		Receive_pfault    = Rcv_mask | 1,  // thread blocked for receive map/grant msg from pager
+		Receive_exception = Rcv_mask | 2   // thread blocked for receive except_msg from exc-handler
 	};
 
 private:
+
+	addr_t _kstack_area;
 
 	// TODO: may be enough store 'timeout' and 'partner'
 	struct Ipc_t
@@ -110,15 +110,26 @@ private:
 		L4_thrid_t to;                // dst for snd phase
 		L4_thrid_t from_spec;         // src pattern for rcv phase
 		Ipc_t() : timeout(0), to(L4_thrid_t::Nil), from_spec(L4_thrid_t::Nil) {}
+		void clear() { timeout = 0; to = from_spec = L4_thrid_t::Nil; }
 	};
 
+	// page fault data
 	struct Pfault_t
 	{
-		word_t addr;                  // pfault address
-		word_t inst;                  // pfault instruction
-		word_t access;                // access permission
-		//word_t status;              // MMU status register value
+		word_t  addr;                 // pfault address
+		word_t  inst;                 // pfault instruction
+		word_t  access;               // access permission
 		Pfault_t() : addr(0), inst(0), access(0) {}
+		void clear() { addr = inst = access = 0; }
+	};
+
+	// exception fault data
+	struct Efault_t
+	{
+		int     type;                 // exc type
+		word_t  pfault_addr_and_acc;  // pfault addr and access
+		Efault_t() : type(0), pfault_addr_and_acc(0) {}
+		void clear() { type = pfault_addr_and_acc = 0; }
 	};
 
 	static unsigned _counter;         // for set id
@@ -130,19 +141,13 @@ private:
 	unsigned _flags;                  // now use only 1 flag:  FPU=1
 	unsigned _fpu_in_use;             // is need store/restore FPU context ?
 
-	// kstack space should be alligned to 8 bytes
-	// TODO:  for arm alligned must be 3 (8=2^3)
-	unsigned _canary1 [Canary1_sz] __attribute__((aligned(16)));  // canary1 to detect stack overflow
-	unsigned _kstack  [Stack_sz]   __attribute__((aligned(16)));  // task's kernel stack
-	unsigned _canary2 [Canary2_sz] __attribute__((aligned(16)));  // canary2 to detect stack corruption
-
-	Float_frame_t _float_frame;
+	Float_frame_t _float_frame __attribute__((aligned(16)));
 
 	// aspace data
-	Task_t* _task;                        // thread's task
-	addr_t _utcb_uva;                     // UTCB va for user address space
-	addr_t _utcb_kva;                     // UTCB va for kernel address space
-	paddr_t _utcb_pa;                     // UTCB location
+	Task_t*     _task;                    // thread's task
+	addr_t      _utcb_uva;                // UTCB va for user address space
+	addr_t      _utcb_kva;                // UTCB va for kernel address space
+	paddr_t     _utcb_pa;                 // UTCB location
 
 	// L4 data
 	L4_thrid_t  _glob_id;                 // global thread ID
@@ -151,8 +156,9 @@ private:
 	Thread_t*   _sched;                   //
 	Thread_t*   _pager;                   //
 	state_t     _state;                   //
-	Ipc_t       _ipc;                     // store active ipc operation data
-	Pfault_t    _pfault;                  // store pfault data
+	Ipc_t       _ipc;                     // store active normal-ipc operation data
+	Pfault_t    _pfault;                  // store active pfault-ipc operation data
+	Efault_t    _efault;                  // store active exc-ipc    operation data
 
 	// sched data
 	struct InheritedPrio_t
@@ -167,69 +173,35 @@ private:
 	inhprios_t  _inherited_prios;         // some threads inerit priority for prio inversion
 	L4_thrid_t  _prio_heir;               // this thread inerited selth prio to _prio_heir
 
-	// Wrm extention:  sw irq
-	bool        _sw_irq_pending;          // flag:  is sowtware irq pending
+	// Wrm extention:  signal
+	bool        _signal_pending;          // flag:  is signal pending
+
+	int         _entry_type;              // 1 - syscall, 2 - pfault, 3 - kpfault, 4 - irq
 
 	threads_t::iter_t _iter;              // iterator for current threads list
+
+	L4_clock_t  _update_timeslice_point;  // time point
+	unsigned    _remaning_timeslice;      // time stamp
 
 	// time accounting
 	Time_account_t _tmaccount;            // for accounting timeslice and profile
 
 public:
 
-	void print_kstack(const char* name, uint32_t* area, size_t sz)
+	void print_kstack()
 	{
-		printf("stack:  name=%s, sz=%u:\n", name, sz);
-		for (unsigned i=0; i<sz; ++i)
-			printf("  0x%08x  %8x\n", area + i, area[i]);
+		printf("stack:  sz=%u:\n", Stack_sz);
+		for (unsigned i=0; i<Stack_sz/sizeof(uint32_t); ++i)
+			printf("  0x%08x  %8x\n", _kstack_area + i * sizeof(uint32_t), ((uint32_t*)(_kstack_area))[i]);
 		printf("\n");
-	}
-
-	bool check_canary()
-	{
-		bool err = 0;
-
-		for (unsigned i=0; i<Canary1_sz; ++i)
-		{
-			if (_canary1[i] != Canary1_val)
-			{
-				printk("ERROR:  kstack overflow, thr_id=%u.\n", _id);
-				err = 1;
-			}
-		}
-
-		for (unsigned i=0; i<Canary2_sz; ++i)
-		{
-			if (_canary2[i] != Canary2_val)
-			{
-				printk("ERROR:  kstack corrupt, thr_id=%u.\n", _id);
-				err = 1;
-			}
-		}
-
-		if (_ksp < (addr_t)_kstack  ||  _ksp > ((addr_t)_kstack + sizeof(_kstack)))
-		{
-			printk("ERROR:  ksp corrupt, thr_id=%u:  kstack=[%x, %x), ksp=%x\n",
-				_id, _kstack, (addr_t)_kstack + sizeof(_kstack), _ksp);
-			err = 1;
-		}
-
-		if (err)
-		{
-			print_kstack("canary1", _canary1, Canary1_sz);
-			print_kstack("area",    _kstack,  Stack_sz);
-			print_kstack("canary2", _canary2, Canary2_sz);
-			printk("kstack error detected.\n");
-		}
-		return !err;
 	}
 
 	unsigned unused_kstack_sz()
 	{
-		for (unsigned i=0; i<Stack_sz; ++i)
-			if (_kstack[i] != Stack_val)
-				return i * sizeof(_kstack[0]);
-		return Stack_sz * sizeof(_kstack[0]);
+		for (unsigned i=0; i<Stack_sz/sizeof(uint32_t); ++i)
+			if (((uint32_t*)(_kstack_area))[i] != Stack_32bit_val)
+				return i * sizeof(uint32_t);
+		return Stack_sz;
 	}
 
 	// for replacement new in list_t
@@ -239,28 +211,16 @@ public:
 		return thr;
 	}
 
-	explicit Thread_t() : _id(_counter++), _ksp((addr_t)_kstack + sizeof(_kstack)), _flags(0), _fpu_in_use(0),
+	explicit Thread_t() : _kstack_area(0), _id(_counter++), _ksp(0/*(addr_t)_kstack + sizeof(_kstack)*/), _flags(0), _fpu_in_use(0),
 	                      _task(0), _utcb_uva(-1), _utcb_kva(-1), _utcb_pa(-1),
 	                      _glob_id(L4_thrid_t::Nil), _sched_id(L4_thrid_t::Nil), _pager_id(L4_thrid_t::Nil),
 	                      _sched(0), _pager(0), _state(Idle),
-	                      _ipc(), _pfault(),
-	                      _prio(0), _prio_heir(L4_thrid_t::Nil), _sw_irq_pending(false), _tmaccount(_name)
+	                      _ipc(), _pfault(), _efault(),
+	                      _prio(0), _prio_heir(L4_thrid_t::Nil), _signal_pending(false),
+	                      _update_timeslice_point(0), _remaning_timeslice(0), _tmaccount(_name)
 	{
 		_name[0] = 0;
-
-		for (unsigned i=0; i<Canary1_sz; ++i)
-			_canary1[i] = Canary1_val;
-
-		for (unsigned i=0; i<Stack_sz; ++i)
-			_kstack[i] = Stack_val;
-
-		for (unsigned i=0; i<Canary2_sz; ++i)
-			_canary2[i] = Canary2_val;
-
-		// NOTE:  _ksp now is pointing to invalid space,
-		//        alloc space before pushing data!
-
-		printk("Thread::ctor:  id=%d, _kstack=0x%x, sz=%u, _ksp=0x%x.\n", _id, _kstack, sizeof(_kstack), _ksp);
+		//printk("Thread::ctor:  id=%d, _kstack=0x%x, sz=%u, _ksp=0x%x.\n", _id, _kstack_area, Stack_sz, _ksp);
 	}
 
 	void name(const char* n, size_t sz = sizeof(_name)-1)
@@ -274,24 +234,43 @@ public:
 			memcpy(kutcb()->tls, _name, 4);
 	}
 
-	inline unsigned        id()             const { return _id;       }
-	inline addr_t          ksp()            const { return _ksp;      }
-	inline addr_t          kentry_sp()      const { return (addr_t)_kstack + sizeof(_kstack); }
-	inline const char*     name()           const { return _name;     }
-	inline unsigned        flags()          const { return _flags;    }
-	inline unsigned        fpu_in_use()     const { return _fpu_in_use; }
-	inline Task_t*         task()           const { return _task;     }
-	inline L4_thrid_t      globid()         const { return _glob_id;  }
-	inline L4_thrid_t      localid()        const { return _utcb_uva; }
-	inline L4_thrid_t      schedid()        const { return _sched_id; }
-	inline L4_thrid_t      pagerid()        const { return _pager_id; }
-	inline Thread_t*       sched()          const { return _sched;    }
-	inline Thread_t*       pager()          const { return _pager;    }
-	inline bool            is_active()      const { return _state != Inactive; }
-	inline uint8_t         prio()           const { return _prio;     }
-	inline L4_thrid_t      prio_heir()      const { return _prio_heir; }
-	inline bool            sw_irq_pending() const { return _sw_irq_pending; }
-	threads_t::iter_t      iter()           const { return _iter; }
+	// allocate kstack and remap it to separate vspace with guard between stacks
+	void alloc_kstack()
+	{
+		assert(!_kstack_area && !_ksp);
+		addr_t  va = kmem_alloc(Stack_sz, Cfg_page_sz);
+		paddr_t pa = kmem_paddr(va, Stack_sz);
+		addr_t  new_va = Aspace::kmap_kstack(pa, Stack_sz);
+		// TODO:  Aspace::kunmap(va, Stack_sz);
+		_kstack_area = new_va;
+		_ksp = _kstack_area + Stack_sz;
+
+		// init stack values for debug
+		for (unsigned i=0; i<Stack_sz/sizeof(uint32_t); ++i)
+			((uint32_t*)(_kstack_area))[i] = Stack_32bit_val;
+	}
+
+	inline unsigned        id()              const { return _id;       }
+	inline addr_t          ksp()             const { return _ksp;      }
+	inline addr_t          kstack_area()     const { return _kstack_area; }
+	inline size_t          kstack_sz()       const { return Stack_sz;  }
+	inline addr_t          kentry_sp()       const { return _kstack_area + Stack_sz; }
+	inline const char*     name()            const { return _name;     }
+	inline unsigned        flags()           const { return _flags;    }
+	inline unsigned        fpu_in_use()      const { return _fpu_in_use; }
+	inline Task_t*         task()            const { return _task;     }
+	inline L4_thrid_t      globid()          const { return _glob_id;  }
+	inline L4_thrid_t      localid()         const { return _utcb_uva; }
+	inline L4_thrid_t      schedid()         const { return _sched_id; }
+	inline L4_thrid_t      pagerid()         const { return _pager_id; }
+	inline Thread_t*       sched()           const { return _sched;    }
+	inline Thread_t*       pager()           const { return _pager;    }
+	inline bool            is_active()       const { return _state != Inactive; }
+	inline uint8_t         prio()            const { return _prio;     }
+	inline L4_thrid_t      prio_heir()       const { return _prio_heir; }
+	inline bool            signal_pending()  const { return _signal_pending; }
+	inline int             entry_type()      const { return _entry_type; }
+	threads_t::iter_t      iter()            const { return _iter; }
 
 	inline void ksp(addr_t v)                  { _ksp        = v; }
 	inline void fpu_in_use(unsigned v)         { _fpu_in_use = v; }
@@ -302,12 +281,30 @@ public:
 	inline void sched(Thread_t* v)             { _sched      = v; }
 	inline void pager(Thread_t* v)             { _pager      = v; }
 	inline void prio_heir(L4_thrid_t v)        { _prio_heir  = v; }
-	inline void sw_irq_pending(bool v)         { _sw_irq_pending = v; }
+	inline void signal_pending(bool v)         { _signal_pending = v; }
+	inline void entry_type(int v)              { _entry_type = v; }
 	inline void iter(threads_t::iter_t v)      { _iter       = v; }
-	inline void timeslice(unsigned v)          { _tmaccount.timeslice(v); }
+
+	// timeslice account
+	unsigned timeslice()               const { return _remaning_timeslice; }
+	void     timeslice(unsigned v)           { _remaning_timeslice = v; }
+	void     timeslice_start(L4_clock_t now) { _update_timeslice_point = now; }
+
+	void timeslice_stop(L4_clock_t now)
+	{
+		L4_clock_t exec_time = now - _update_timeslice_point;
+		_remaning_timeslice -= min(exec_time, _remaning_timeslice);
+		_update_timeslice_point = 0;
+	}
+
+	void timeslice_update(L4_clock_t now)
+	{
+		L4_clock_t exec_time = now - _update_timeslice_point;
+		_remaning_timeslice -= min(exec_time, _remaning_timeslice);
+		_update_timeslice_point = now;
+	}
 
 	// time account funcs
-	inline unsigned   timeslice()                 const { return _tmaccount.timeslice(); }
 	inline L4_clock_t tmspan_exec()               const { return _tmaccount.tmspan_exec(); }
 	inline L4_clock_t tmspan_uexec()              const { return _tmaccount.tmspan_uexec(); }
 	inline L4_clock_t tmspan_kexec()              const { return _tmaccount.tmspan_kexec(); }
@@ -330,7 +327,7 @@ public:
 	inline void       tmevent_kwork_3s(L4_clock_t c)    { return _tmaccount.tmevent_kwork_3s(c); }
 	inline void       tmevent_kwork_3e(L4_clock_t c)    { return _tmaccount.tmevent_kwork_3e(c); }
 
-	inline void prio(uint8_t v)
+	void prio(uint8_t v)
 	{
 		// ready list is unique for every priority
 		// delete item for current ready list
@@ -346,13 +343,13 @@ public:
 
 	void flags(word_t f)
 	{
-		// now FPU flag only supported (flag 0x1)
-		// disable FPU if need
-		if (_flags == 1  &&  f == 0)
+		if ((_flags & L4_flags_fpu)  &&  !(f & L4_flags_fpu))
 		{
+			// disable FPU for thread
 			fpu_in_use(false);
 			entry_frame()->disable_fpu();
 		}
+		//force_printk_uart("flags:  0x%lx -> 0x%lx\n", _flags, f);
 		_flags = f;
 	}
 
@@ -360,23 +357,28 @@ public:
 	{
 		switch (state)
 		{
-			case Idle:            return "idle";
-			case Inactive:        return "inactive";
-			case Active:          return "active";
-			case Ready:           return "ready";
-			case Send_ipc:        return "send_ipc";
-			case Send_pfault:     return "send_pfault";
-			case Receive_ipc:     return "receive_ipc";
-			case Receive_pfault:  return "receive_pfault";
+			case Idle:               return "idle";
+			case Inactive:           return "inactive";
+			case Active:             return "active";
+			case Ready:              return "ready";
+			case Send_ipc:           return "send_ipc";
+			case Send_pfault:        return "send_pfault";
+			case Send_exception:     return "send_exc";
+			case Receive_ipc:        return "receive_ipc";
+			case Receive_pfault:     return "receive_pfault";
+			case Receive_exception:  return "receive_exc";
 		}
 		return "__unknown_state__";
 	}
-	const char* state_str()    const { return state_str(_state); }
+	const char* state_str()    const { return state_str(_state);     }
 
-	bool inline is_snd_state() const { return _state & Snd_mask; }
-	bool inline is_rcv_state() const { return _state & Rcv_mask; }
+	bool inline is_snd_state() const { return _state & Snd_mask;     }
+	bool inline is_rcv_state() const { return _state & Rcv_mask;     }
 
-	inline L4_thrid_t ipc_to()        const { return _ipc.to; }
+	inline void ipc_to(L4_thrid_t v)        { _ipc.to = v;           }
+	inline void ipc_from_spec(L4_thrid_t v) { _ipc.from_spec = v;    }
+
+	inline L4_thrid_t ipc_to()        const { return _ipc.to;        }
 	inline L4_thrid_t ipc_from_spec() const { return _ipc.from_spec; }
 
 	inline void save_rcv_phase(L4_time_t timeout, L4_thrid_t from_spec)
@@ -388,7 +390,7 @@ public:
 		//printk("-- from_spec=0x%x/%u, timeout=%llu, expired=%llu.\n",
 		//	from_spec.raw(), from_spec.number(), timeout.rel_usec(), _ipc.timeout);
 	}
-	
+
 	inline void save_snd_phase(L4_time_t timeout, L4_thrid_t to)
 	{
 		assert(timeout.is_rel());
@@ -406,13 +408,21 @@ public:
 		_pfault.addr   = fault_addr;
 		_pfault.access = fault_access;
 		_pfault.inst   = fault_inst;
-
-		_ipc.to = _pager_id;
+		//_ipc.to = _pager_id;
 	}
-	
-	inline word_t pf_addr()      const { return _pfault.addr;    }
-	inline word_t pf_inst()      const { return _pfault.inst;    }
-	inline word_t pf_access()    const { return _pfault.access;  }
+
+	inline word_t  pf_addr()       const { return _pfault.addr;       }
+	inline word_t  pf_inst()       const { return _pfault.inst;       }
+	inline word_t  pf_access()     const { return _pfault.access;     }
+
+	inline void exc_save(int exc_type, word_t pfault_addr_and_acc)
+	{
+		_efault.type                = exc_type;
+		_efault.pfault_addr_and_acc = pfault_addr_and_acc;
+	}
+
+	inline int    exc_type() const { return _efault.type;                }
+	inline word_t exc_pf()   const { return _efault.pfault_addr_and_acc; }
 
 	void inherit_prio_dump()
 	{
@@ -430,7 +440,7 @@ public:
 
 	void inherit_prio_add(L4_thrid_t owner, unsigned priority)
 	{
-		printk("inh_prio_add:  iam=%u:  owner=%u, prio=%u, inh_prio_list_sz=%u.\n",
+		printk("inh_prio_add:  iam=%u:  owner=%u, prio=%u, inh_prio_list_sz=%zu.\n",
 			globid().number(), owner.number(), priority, _inherited_prios.size());
 		assert(owner != globid());
 		assert(inherit_prio_find(owner) == _inherited_prios.end());
@@ -439,7 +449,7 @@ public:
 
 	void inherit_prio_del(L4_thrid_t owner, unsigned priority)
 	{
-		printk("inh_prio_del:  iam=%u:  owner=%u, prio=%u, inh_prio_list_sz=%u.\n",
+		printk("inh_prio_del:  iam=%u:  owner=%u, prio=%u, inh_prio_list_sz=%zu.\n",
 			globid().number(), owner.number(), priority, _inherited_prios.size());
 		(void) priority;
 		inhprios_t::iter_t it = inherit_prio_find(owner);
@@ -524,7 +534,7 @@ public:
 			_sched = threads_find(_sched_id);
 			assert(_pager && _sched);
 
-			L4_utcb_t* p = cur_thr()->task()==task() ? utcb() : kutcb();
+			L4_utcb_t* p = utcb();
 			p->global_id(globid());
 		}
 
@@ -540,17 +550,17 @@ public:
 	inline state_t state() const { return _state; }
 	inline void state(state_t s)
 	{
-		printk("%s:  0x%x/%u:  state:  %s -> %s.\n", _name, globid().raw(), globid().number(), state_str(), state_str(s));
+		printk("%s:  %u:  state:  %s -> %s.\n", _name, globid().number(), state_str(), state_str(s));
 		assert(_state != s);
 
-		// delete from cur list if need
+		// delete from cur sched-list if need
 		if (_state == Ready)
 			_iter = threads_del_ready(_iter);
 		else
 		if (_state == Send_ipc  &&  _ipc.timeout != -1)
 			_iter = threads_del_snd_timeout_waiting(_iter);
 		else
-		if (_state == Send_ipc)
+		if (_state == Send_ipc  /**/ || _state==Send_pfault || _state==Send_exception /*~*/)
 			_iter = threads_del_send(_iter);
 		else
 		if (_state == Receive_ipc  &&  _ipc.timeout != -1)
@@ -558,22 +568,38 @@ public:
 
 		_state = s;
 
-		// add to new list if need
+		// add to sched-new list if need
 		if (s == Ready)
+		{
+			_ipc.clear();
+			_pfault.clear();
+			timeslice(Kcfg::Timeslice_usec);
 			_iter = threads_add_ready(this);
+		}
 		else
 		if (s == Send_ipc  &&  _ipc.timeout != -1)
 			_iter = threads_add_snd_timeout_waiting(this);
 		else
-		if (s == Send_ipc)
+		if (s == Send_ipc /**/ || s==Send_pfault || s==Send_exception /*~*/)
 			_iter = threads_add_send(this);
 		else
 		if (s == Receive_ipc  &&  _ipc.timeout != -1)
 			_iter = threads_add_rcv_timeout_waiting(this);
+
+		// remove inherited prio if need
+		if (!prio_heir().is_nil())
+		{
+			Thread_t* thr = threads_find(prio_heir());
+			assert(thr);
+			thr->inherit_prio_del(globid(), prio_max());
+			prio_heir(L4_thrid_t::Nil);
+		}
 	}
 
-	inline L4_utcb_t*  utcb() const { return (L4_utcb_t*) _utcb_uva; }  // used for intra aspace access
+	inline L4_utcb_t* uutcb() const { return (L4_utcb_t*) _utcb_uva; }  // used for intra aspace access
 	inline L4_utcb_t* kutcb() const { return (L4_utcb_t*) _utcb_kva; }  // used for other aspace access, don't forget flush dcache
+	inline L4_utcb_t*  utcb() const { return cur_thr()->task()==task() ? uutcb() : kutcb(); }
+
 	inline paddr_t utcb_location() { return _utcb_pa; }
 
 	inline void utcb(addr_t va)
@@ -593,30 +619,35 @@ public:
 		memcpy(kutcb()->tls, _name, 4);
 	}
 
-	Entry_frame_t* entry_frame()
+	Entry_frame_t* entry_frame() const
 	{
-		addr_t addr = (addr_t)_kstack + sizeof(_kstack) - sizeof(Entry_frame_t);
+		addr_t addr = (addr_t)_kstack_area + Stack_sz - sizeof(Entry_frame_t);
 		return (Entry_frame_t*) addr;
+	}
+
+	static void user_invoke()
+	{
+		arch_user_invoke();
 	}
 
 	void set_initial_stack_frame(addr_t entry, addr_t sp)
 	{
-		printk("%s:  entry=%x, sp=%x, _ksp=%x, utcb=%x.\n", __func__, entry, sp, _ksp, _utcb_uva);
+		printk("%s:  entry=%lx, sp=%lx, _ksp=%lx, utcb=%lx.\n", __func__, entry, sp, _ksp, _utcb_uva);
 
 		assert(_ksp);
 		assert(_utcb_uva);
 		assert(entry);
 
-		Stack::push(&_ksp, _flags);                   // user_invoke() will use it from the stack
-		Stack::push(&_ksp, sp);                       // user_invoke() will use it from the stack
-		Stack::push(&_ksp, entry);                    // user_invoke() will use it from the stack
-		Stack::push(&_ksp, _utcb_uva);                // user_invoke() will use it from the stack
-		Stack::push(&_ksp, (word_t)arch_user_invoke); // context_switch() will use it from the stack
+		Stack::push(&_ksp, _flags);              // user_invoke() will use it from the stack
+		Stack::push(&_ksp, sp);                  // user_invoke() will use it from the stack
+		Stack::push(&_ksp, entry);               // user_invoke() will use it from the stack
+		Stack::push(&_ksp, _utcb_uva);           // user_invoke() will use it from the stack
+		Stack::push(&_ksp, (word_t)user_invoke); // context_switch() will use it from the stack
 	}
 
 	void store_floats()
 	{
-		if (fpu_in_use())
+		if (fpu_in_use()  /*TESTME*/ &&  entry_frame()->is_fpu_enabled()/*~TESTME*/)
 			arch_store_floats(&_float_frame);
 	}
 
@@ -654,8 +685,6 @@ public:
 		_pending = false;
 		if (h.is_nil())
 			Intc::mask(_intno);
-		//else                           DELME
-		//	Intc::unmask(_intno);        DELME
 	}
 
 	inline void pending(bool p)       { _pending = p;              }

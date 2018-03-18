@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "assert.h"
+#include <assert.h>
 
 //--------------------------------------------------------------------------------------------------
 // The __cxa_pure_virtual function is an error handler

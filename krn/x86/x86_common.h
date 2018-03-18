@@ -9,7 +9,7 @@
 
 #include "krn-config.h"
 #include "printk.h"
-#include "panic.h"
+#include "wlibc_panic.h"
 #include <string.h>
 
 //--------------------------------------------------------------------------------------------------

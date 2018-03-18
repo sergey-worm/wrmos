@@ -21,6 +21,8 @@ addr_t Uart::_addr = -1;
 #include "sysclock.h"
 
 L4_clock_t SystemClock_t::_sys_clock = 0;
+L4_kip_t*  SystemClock_t::_kip = 0;
+int        SystemClock_t::_inside_kdb = 0;
 
 #include "kmem.h"
 

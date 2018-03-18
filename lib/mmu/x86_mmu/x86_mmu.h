@@ -21,12 +21,12 @@
 #ifndef MMU_H
 #define MMU_H
 
-#include "types.h"
-#include "processor.h"
-#include "assert.h"
+#include "sys_types.h"
+#include "sys_proc.h"
+#include "wlibc_assert.h"
 
-#if defined (Cfg_debug) && defined (USE_MMU_ASSERT)
-#  define mmu_assert assert
+#if defined (DEBUG) && defined (USE_MMU_ASSERT)
+#  define mmu_assert wassert
 #else
 #  define mmu_assert(expr)
 #endif

@@ -10,9 +10,9 @@
 #include "krn-config.h"
 #include "kconfig.h"
 #include "thread.h"
-#include "l4kdbops.h"
 #include "sched.h"
-#include "l4ipcerr.h"
+#include "l4_kdbops.h"
+#include "l4_ipcerr.h"
 
 //==================================================================================================
 class Threads_t
@@ -61,7 +61,7 @@ public:
 		L4_clock_t now = SystemClock_t::sys_clock(__func__);
 		L4_clock_t exec = 0;
 
-		printf("  ##   id  name  prio/max  cpu,%%  state           partner       no-act,us  sw-irq\n");
+		printf("  ##   id  name  task  prio/max  cpu,%%  state           partner       no-act,us  signal\n");
 		for (unsigned i=0; i<sizeof(_threads)/sizeof(_threads[i]); ++i)
 		{
 			Thread_t* it = _threads + i;
@@ -87,10 +87,10 @@ public:
 
 			unsigned long long no_activity_us = Sched_t::current()==&*it ? 0 : (now - it->tmpoint_suspend());
 
-			printf(" %3d  %3d  %4s   %3u/%3u   %2u.%u  %-14s  %7s  %14s  %6d\n",
-					it->id(), it->globid().number(), it->name(), it->prio(), it->prio_max(),
-					promile/10, promile%10, it->state_str(), partner, separated_str(no_activity_us),
-					it->sw_irq_pending());
+			printf(" %3d  %3d  %4s    %2u   %3u/%3u   %2u.%u  %-14s  %7s  %14s  %6d\n",
+					it->id(), it->globid().number(), it->name(), it->task()->id(), it->prio(),
+					it->prio_max(), promile/10, promile%10, it->state_str(), partner,
+					separated_str(no_activity_us), it->signal_pending());
 		}
 		printf("\n");
 		printf(" uptime,us:    %s\n", separated_str(now));
@@ -157,15 +157,36 @@ public:
 			threads[cnt].id = 0;  // end-of-list marker
 	}
 
+	static void remap_user_utcb(Task_t* tsk)
+	{
+		for (unsigned i=0; i<sizeof(_threads)/sizeof(_threads[i]); ++i)
+		{
+			Thread_t* t = _threads + i;
+			if (t->task() == tsk)
+			{
+				paddr_t utcb_pa = tsk->walk((addr_t)t->kutcb(), Cfg_page_sz);
+				tsk->map((addr_t)t->uutcb(), utcb_pa, Cfg_page_sz, Acc_utcb, Cachable);
+			}
+		}
+	}
+
+	static void alloc_kstack()
+	{
+		for (unsigned i=0; i<sizeof(_threads)/sizeof(_threads[i]); ++i)
+		{
+			_threads[i].alloc_kstack();
+		}
+	}
+
 	static Int_thread_t* int_thread(unsigned irq)
 	{
 		return irq < Kcfg::Ints_max  ?  &_int_threads[irq]  :  0;
 	}
 
 	// create user thread
-	static Thread_t& create(L4_thrid_t globid, L4_thrid_t sched, L4_thrid_t pager, Task_t* tsk, uint8_t prio, const char* name)
+	static Thread_t* create(L4_thrid_t globid, L4_thrid_t sched, L4_thrid_t pager, Task_t* tsk, uint8_t prio, const char* name)
 	{
-		printk("new thread:  id=0x%x/%u, prio=%u, name=%s.\n", globid.raw(), globid.number(), prio, name);
+		printk("new thread:  id=0x%lx/%u, prio=%u, name=%s.\n", globid.raw(), globid.number(), prio, name);
 		assert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
 		Thread_t* thr = &_threads[globid.number() - Thread_number_min];
 		assert(thr->state() == Thread_t::Idle);
@@ -175,46 +196,20 @@ public:
 		thr->schedid(sched);
 		thr->pagerid(pager);
 		thr->prio(prio);
-		thr->timeslice(Kcfg::Timeslice_usec);
 		thr->state(Thread_t::Inactive);
-		return *thr;
+		return thr;
 	}
 
 	// create kernel thread
 	inline static void create_kthread_and_go(void* entry_point, Task_t* tsk, const char* name)
 	{
-		// TODO:  use create()
 		L4_thrid_t globid = L4_thrid_t::create_global(get_kip()->thread_info.system_base(), 1);
-		assert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
-		Thread_t* thr = &_threads[globid.number() - Thread_number_min];
-		assert(thr->state() == Thread_t::Idle);
-		thr->task(tsk);
-		thr->name(name);
-		thr->globid(globid);
-		thr->prio(Thread_t::Prio_min);
-		thr->timeslice(Kcfg::Timeslice_usec);
+		Thread_t* thr = create(globid, globid, globid, tsk, Thread_t::Prio_min, name);
 		thr->state(Thread_t::Ready);
 		thr->tmevent_resume(SystemClock_t::sys_clock(__func__));
-
-		// make current
 		Sched_t::current(thr);
-
-#if defined (Cfg_arch_sparc)
-		Proc::discard_dirty_regwins();
-		Proc::sp(thr->ksp() - Stack_frame_sz);
-		asm volatile ("jmp %0;  nop" :: "r"(entry_point));
-#elif defined (Cfg_arch_arm)
-		Proc::sp(thr->ksp());
-		asm volatile ("mov pc, %0" :: "r"(entry_point));
-#elif defined Cfg_arch_x86
-		Proc::sp(thr->ksp());
-		asm volatile ("jmp *%0" :: "r"(entry_point));
-#elif defined Cfg_arch_x86_64
-		Proc::sp(thr->ksp());
-		asm volatile ("jmp *%0" :: "r"(entry_point));
-#else
-# error unsupported arch
-#endif
+		Proc::set_new_stack_area(thr->kstack_area(), thr->kstack_sz());
+		Proc::jump((addr_t)entry_point);
 	}
 
 	static Thread_t* find(unsigned thrid_num)
@@ -227,15 +222,36 @@ public:
 		return 0;
 	}
 
+	// XXX:  It need to find by local ID.
+	//       NOTE:  My kernel implementation works faster with global ID,
+	//              may be need discard works with local ID inside kernel?
+	static Thread_t* find_by_utcb(addr_t utcb)
+	{
+		for (unsigned i=0; i<sizeof(_threads)/sizeof(_threads[i]); ++i)
+		{
+			Thread_t* t = _threads + i;
+			if (t->task() == Sched_t::current()->task()  &&  utcb == (addr_t)t->uutcb())
+				return t->state() == Thread_t::Idle ? 0 : t;
+		}
+		dump();
+		panic("%s:  no thread with such utcb=0x%lx.\n", __func__, utcb);
+		return 0;
+	}
+
 	static Thread_t* find(L4_thrid_t id)
 	{
 		if (id.is_global())
 		{
 			return find(id.number());
 		}
-		else if (id.is_local()) // XXX:  is correct compare localid without check that task is the same?
+		else if (id.is_local())
 		{
+			#if 1
+			return find_by_utcb(id.raw());
+			#else
+			// if corrupt ID or id-thread in alien aspace -> PF, bug
 			return find(((L4_utcb_t*)id.raw())->global_id().number());
+			#endif
 		}
 		return 0;
 	}
@@ -295,7 +311,7 @@ private:
 		Thread_t* res = 0;
 		for (threads_t::iter_t it=list->begin(); it!=list->end(); ++it)
 		{
-			//printk("%s:  thr=%s, state=%s.\n", __func__, it->name(), it->state_str());
+			//printk("%s:  thr=%s, state=%s.\n", __func__, (*it)->name(), (*it)->state_str());
 
 			if (!_is_good_sender(*rcv, from_spec, *it, propagated, use_local_id))
 				continue;
@@ -401,15 +417,17 @@ public:
 	// replace cur thread at the end of que and set new timeslice
 	static threads_t::iter_t timeslice_expired(Thread_t* thr, threads_t* que = 0)
 	{
+		assert(!thr->timeslice());
+		assert(thr->state() == Thread_t::Ready);
 		if (!que)
 			que = ready_threads(thr->prio());
+		thr->timeslice(Kcfg::Timeslice_usec);
 		threads_t::iter_t it = thr->iter();
-		(*it)->timeslice(Kcfg::Timeslice_usec);
 		if (que->size() > 1)
 		{
 			// replace at the end of que
 			que->push_back(*it);
-			(*it)->iter(que->last());
+			thr->iter(que->last());
 			que->erase(it);
 		}
 		return que->begin();
@@ -428,11 +446,11 @@ public:
 					if ((_ready_bits[i] >> j) & 0x1)
 					{
 						unsigned prio = sizeof(bits_t)*8*i + j;
-						assert(prio <= Thread_t::Prio_max);
-						threads_t* que = &_ready_threads[prio];
+						threads_t* que = ready_threads(prio);
 						assert(que->size());
 						threads_t::iter_t it = que->begin();
-						it = timeslice_expired(*it, que);
+						if (!(*it)->timeslice())
+							it = timeslice_expired(*it, que);
 						return *it;
 					}
 				}
@@ -498,8 +516,8 @@ private:
 				next = t;
 
 			int phase = t->state() == Thread_t::Send_ipc ? L4_snd_phase : L4_rcv_phase;
-			L4_utcb_t* utcb = Sched_t::current()->task()==t->task() ? t->utcb() : t->kutcb();
-			utcb->ipc_error_code(L4_ipcerr_t(phase, Ipc_timeout));
+			L4_utcb_t* utcb = t->utcb();
+			utcb->ipc_error_code(L4_ipcerr_t(phase, L4_ipc_timeout));
 			utcb->msgtag().ipc_set_failed();
 
 			threads_t::iter_t next_it = it + 1;

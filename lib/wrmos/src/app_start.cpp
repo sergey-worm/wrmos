@@ -4,21 +4,31 @@
 //
 //##################################################################################################
 
-#include "stack.h"
-#include "l4api.h"
-#include "libc_io.h"
+#include "sys_stack.h"
+#include "l4_api.h"
+#include "wlibc_cb.h"
 #include "wrm_thr.h"
+#include "wrm_mpool.h"
 #include "wrm_log.h"
-#include "panic.h"
+#include "wlibc_panic.h"
 
 int main(int, const char**);
 
-static void init_io()
+static void break_execution(const char* str)
 {
-	Libc_io_callbacks_t io;
-	io.out_char    = NULL;
-	io.out_string  = l4_out_string;
-	libc_init_io(&io); // init libc handlers
+	bool error_entry = true;
+	l4_kdb(str, error_entry);
+}
+
+static void init_wlibc_callbacks()
+{
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = NULL;
+	cb->out_string = l4_kdb_putsn;
+	cb->in_char    = NULL;
+	cb->in_string  = NULL;
+	cb->malloc     = wrm_malloc;
+	cb->break_exec = break_execution;
 }
 
 static void before_cb(size_t addr)
@@ -32,7 +42,8 @@ static void after_cb(size_t addr)
 }
 
 // application entry point
-// there are 3 params on top of the stack:  fpu_enable, argc, argv.
+// there are 3 params on top of the stack:  fpu_enable, argc, argv
+// use assm code to avoid function epilogue influens on SP
 extern "C" void _start()
 {
 	#if defined (Cfg_arch_sparc)
@@ -42,6 +53,7 @@ extern "C" void _start()
 		"ld [%sp + 4], %o1   \n"
 		"ld [%sp + 8], %o2   \n"
 		"add %sp, 12, %sp    \n"
+		"add %sp, -96, %sp   \n"
 		"b _startup          \n"
 		" nop                \n"
 	);
@@ -54,15 +66,15 @@ extern "C" void _start()
 	#elif defined (Cfg_arch_x86)
 	asm volatile
 	(
-		"call _startup"
+		"call _startup       \n"
 	);
 	#elif defined (Cfg_arch_x86_64)
 	asm volatile
 	(
-		"pop %rdi    \n"
-		"pop %rsi    \n"
-		"pop %rdx    \n"
-		"call _startup"
+		"pop %rdi            \n"
+		"pop %rsi            \n"
+		"pop %rdx            \n"
+		"call _startup       \n"
 	);
 	#else
 	#error Unknown arch.
@@ -72,20 +84,8 @@ extern "C" void _start()
 //extern "C" void _start()
 extern "C" void _startup(word_t fpu, word_t argc, word_t argv)
 {
-	/*  DELME:  bad code, function epilogue influens on SP
-	#if defined (Cfg_arch_sparc)
-	addr_t sp = Proc::fp();
-	#elif defined (Cfg_arch_arm)
-	addr_t sp = Proc::sp();
-	#endif
-	Stack::pop(&sp); // skip
-	word_t fpu = Stack::pop(&sp);
-	word_t argc = Stack::pop(&sp);
-	word_t argv = Stack::pop(&sp);
-	*/
-
 	init_bss();                        // clear .bss section
-	init_io();                         // initialize IO
+	init_wlibc_callbacks();            // initialize wlibc callbacks
 
 	// enable fpu if need
 	if (fpu)
@@ -104,7 +104,7 @@ extern "C" void _startup(word_t fpu, word_t argc, word_t argv)
 
 	call_dtors();
 
-	// TODO:  now need to terminate app
+	// TODO:  now need to terminate app - send msg to alph
 	// now just workaround:
 	l4_kdb("App terminated.");
 

@@ -17,76 +17,6 @@
 #define t_ttype    l7    /*  Trap Type                                            */
 
 //-------------------------------------------------------------------------------------------------
-// DEBUG - internal debug logging of trap events.
-//-------------------------------------------------------------------------------------------------
-//#ifdef DEBUG
-#if 0
-
-#define addrLogPtr    0x41000000
-#define addrLogOver   0x41000004
-#define addrLogStart  0x41000010
-#define addrLogEnd    0x42000000
-
-#define wofEntry   0x00010001
-#define wofExit    0x00010002
-#define wufEntry   0x00020001
-#define wufExit    0x00020002
-#define irqEntry   0x00030001
-#define irqSave    0x00030002
-#define irqRestore 0x00030003
-#define irqExit    0x00030004
-
-.macro DBG_INIT_LOG  scratch1 scratch2
-	set addrLogStart, %\scratch1
-	set addrLogPtr, %\scratch2
-	st %\scratch1, [ %\scratch2 ]
-.endm
-
-.macro DBG_ADD_LOG  who scratch1 scratch2
-	set addrLogPtr, %\scratch1
-	ld [ %\scratch1 ], %\scratch1
-
-	set \who, %\scratch2
-	st %\scratch2, [ %\scratch1 ];  add %\scratch1, 4, %\scratch1
-
-	st %g0, [ %\scratch1 ];         add %\scratch1, 4, %\scratch1
-	st %g0, [ %\scratch1 ];         add %\scratch1, 4, %\scratch1
-	st %g0, [ %\scratch1 ];         add %\scratch1, 4, %\scratch1
-
-	// now new logPtr in scratch1
-	// if logPtr > logEnd ...
-	set addrLogEnd, %\scratch2
-	cmp %\scratch1, %\scratch2
-	bl 1f
-	 nop
-
-	// ... then logPtr = LogStart, logOver++
-	set addrLogStart, %\scratch1
-
-1:
-	// write "log end" marker
-	st %g0, [ %\scratch1 + 0 ]
-	st %g0, [ %\scratch1 + 4 ]
-	st %g0, [ %\scratch1 + 8 ]
-	st %g0, [ %\scratch1 + 12 ]
-
-	// write new logPtr
-	set addrLogPtr, %\scratch2
-	st %\scratch1, [ %\scratch2 ]
-.endm
-
-#else
-
-.macro DBG_INIT_LOG  scratch1 scratch2
-.endm
-
-.macro DBG_ADD_LOG  who scratch1 scratch2
-.endm
-
-#endif
-
-
-//-------------------------------------------------------------------------------------------------
 // MACROS - some low-level operations.
 //-------------------------------------------------------------------------------------------------
 
@@ -95,7 +25,7 @@
 	srl  %\psrval, 5, %\psrval
 	sll  %\psrval, 5, %\psrval
 	mov %psr, %\scratch
-	and %\scratch, 0x1F, %\scratch
+	and %\scratch, 0x1f, %\scratch
 	or  %\scratch, %\psrval, %\psrval
 .endm
 
@@ -117,7 +47,7 @@
 	mov  1, %l1
 	sll  %l1, %l0, %l1
 	wr  %l1, %wim
-	// now we have 3 delay slots on HW and no slots on qemu/tsim
+	// nop; nop; nop   // 3 delay slots, but don't need here
 	// store remaining regs
 	std %l2, [%\base +  8]
 	std %l4, [%\base + 16]
@@ -155,46 +85,6 @@
 	ldd [%\base + 16], %g4
 	ldd [%\base + 24], %g6
 	wr  %\scratch, %y
-.endm
-
-.macro store_floats  base
-	std %f0,  [%\base +   0]
-	std %f2,  [%\base +   8]
-	std %f4,  [%\base +  16]
-	std %f6,  [%\base +  24]
-	std %f8,  [%\base +  32]
-	std %f10, [%\base +  40]
-	std %f12, [%\base +  48]
-	std %f14, [%\base +  56]
-	std %f16, [%\base +  64]
-	std %f18, [%\base +  72]
-	std %f20, [%\base +  80]
-	std %f22, [%\base +  88]
-	std %f24, [%\base +  96]
-	std %f26, [%\base + 104]
-	std %f28, [%\base + 112]
-	std %f30, [%\base + 120]
-	st  %fsr, [%\base + 128]
-.endm
-
-.macro restore_floats  base
-	ldd [%\base +   0], %f0
-	ldd [%\base +   8], %f2
-	ldd [%\base +  16], %f4
-	ldd [%\base +  24], %f6
-	ldd [%\base +  32], %f8
-	ldd [%\base +  40], %f10
-	ldd [%\base +  48], %f12
-	ldd [%\base +  56], %f14
-	ldd [%\base +  64], %f16
-	ldd [%\base +  72], %f18
-	ldd [%\base +  80], %f20
-	ldd [%\base +  88], %f22
-	ldd [%\base +  96], %f24
-	ldd [%\base + 104], %f26
-	ldd [%\base + 112], %f28
-	ldd [%\base + 120], %f30
-	ld  [%\base + 128], %fsr
 .endm
 
 .macro store_syscall_frame  base
@@ -235,11 +125,18 @@
 
 // valid for NWIN = 8
 .macro get_wim_for_cwp_plus_one  psrval scratch wimres
-	mov 2, %\scratch
+	mov 2, %\scratch                      // scratch = 1 << +1
 	sll %\scratch, %\psrval, %\scratch    // scratch = 1 << (cwp + 1)
 	srl %\scratch, 8, %\wimres            // wimres = 1 >> (cwp - 7)
 	or  %\scratch, %\wimres, %\wimres     // wimres = two bits
 	and %\wimres, 0xff, %\wimres          // wimres = result wim
+.endm
+
+// valid for NWIN = 8
+.macro get_wim_for_cwp  psrval scratch wimres
+	and %\psrval, 0x1f, %\scratch         // scratch = psrval.cwp
+	mov 1, %\wimres                       // wimres = 1
+	sll %\wimres, %\scratch, %\wimres     // wimres =<< scratch
 .endm
 
 // valid for NWIN = 8
@@ -254,7 +151,7 @@
 
 // assert( wim[CWP+1] == 1 )
 .macro assert_prev_win_is_invalid  psrval scratch1 scratch2
-#ifdef Cfg_debug
+#ifdef DEBUG
 	get_wim_for_cwp_plus_one  \psrval \scratch1 \scratch2  // scratch2 = expected wim
 	rd  %wim, %\scratch1                                   // scratch1 = real_wim
 	andcc %\scratch1, %\scratch2, %g0
@@ -270,8 +167,9 @@
 #define Regwin_frame_sz        64 /* use for load/store register window */
 #define Syscall_frame_sz       32
 #define Global_frame_sz        32
-#define Float_frame_sz        136 /* (32 %fx) + (%fsr) + (4 byte alignment) */
-#define Proc_status_frame_sz    8 /* content t_psr */
+#define Proc_status_frame_sz   16 /* content trap time regs:  t_psr, t_wim, t_pc, t_npc */
+
+// summary entry frame size = 7*64 + 32 + 32 + 16 = 524 = 0x210
 
 //--------------------------------------------------------------------------------------------------
 // Used for inst/data-exception, syscall, irq.
@@ -283,19 +181,23 @@
 	st %\scratch2, [%\scratch1 + %lo(\val_addr)]  // *scratch1 = scratch2
 .endm
 
+#define USE_FIXED_REGWINS_AREA 1
+
 //--------------------------------------------------------------------------------------------------
-// Used for inst/data-exception, syscall, irq.
-.macro exception_entry  scratch scratch_sp
+// Using for inst/data-exception, syscall, irq.
+.macro exception_entry  scratch scratch_sp force_eentry_user=0
 
 	// USE:  only LOCALS (t_xxx and scratch)
 
 	// storage timer value for time accounting
 	store_timer_value  cur_kentry_start \scratch \scratch_sp
 
+	.if \force_eentry_user
 	// did exceptions occur in user ?
 	btst 0x40, %t_psr
 	bne 5f
 	 nop
+	.endif
 
 1:	// eentry_user
 
@@ -305,29 +207,22 @@
 	sethi %hi(cur_ksp), %\scratch
 	ld [%\scratch + %lo(cur_ksp)], %\scratch_sp
 
-	// STEP X:  store t_psr, to allow modify it in kernel
+	// STEP 2:  store t_psr (to allow modify it in kernel) and t_pc
 	sub %\scratch_sp, Proc_status_frame_sz, %\scratch_sp
-	st %t_psr, [%\scratch_sp]
+	st %t_psr, [%\scratch_sp +  0]
+	st %t_wim, [%\scratch_sp +  4]
+	st %t_pc,  [%\scratch_sp +  8]
+	st %t_npc, [%\scratch_sp + 12]
 
-	// STEP 2:  store Syscall_frame
+	// STEP 3:  store Syscall_frame
 	sub %\scratch_sp, Syscall_frame_sz, %\scratch_sp
 	store_syscall_frame \scratch_sp
 
-	// STEP 3:  store Globals
+	// STEP 4:  store Globals
 	sub %\scratch_sp, Global_frame_sz, %\scratch_sp
 	store_globals  \scratch_sp, \scratch
 
 	// USE:  LOCALS and GLOBALS
-
-	// STEP 4:  store floats if need (reserve float_frame)
-	sub %\scratch_sp, Float_frame_sz, %\scratch_sp
-	/*
-	srl %t_psr, 12, %g1                      // psr.ef is bit #12
-	andcc %g1, 0x1, %g0                      // is set ?
-	be 2f
-	 nop
-	store_floats  \scratch_sp
-	*/
 
 2:	// store_user_regwins
 
@@ -343,35 +238,56 @@
 	mov %t_wim, %g_wim                       // save WIM in globals
 	mov %\scratch_sp, %g_sp                  // save SP in globals
 
-	get_wim_for_cwp_plus_one  t_psr g2 g1    // g1 = 1 << (cwp + 1)
+	#if USE_FIXED_REGWINS_AREA
+
+	get_wim_for_cwp  t_psr g2 g1             // g1_cur = 1 << cwp
+
+30:	// loop1_start - skip space for clean windows
+
+	cmp %g1, %g_wim                          // while ( g1_cur != wim )  // while cur win is valid
+	be 40f                                   // {
+	 nop                                     //
+                                             //
+	sub %g_sp, Regwin_frame_sz, %g_sp        //     preserve space for user Regwin_frame
+	rotate_right g1 g2                       //     g1_cur =>> 1
+                                             //
+	b 30b                                    //
+	 nop                                     // }
+
+40:	// loop1_end
+
+	#endif // USE_FIXED_REGWINS_AREA
+
+	get_wim_for_cwp_plus_one  t_psr g2 g1    // g1_prev = 1 << (cwp + 1)
 	mov %g1, %g_nwim                         // save new wim to set after flushing user regwins
 
 	// USE:  only GLOBALS
 
-3:	// loop_start
+3:	// loop2_start - store dirty windows
 
-	cmp %g1, %g_wim                          // while  ( wim != (cwp + 1))  // prev win is valid
+	cmp %g1, %g_wim                          // while ( g1_prev != wim )  // while prev win is valid
 	be 4f                                    // {
 	 nop                                     //
                                              //
 	restore                                  //     cwp++, go into prev window
 	sub %g_sp, Regwin_frame_sz, %g_sp        //     preserve space for user Regwin_frame
 	store_frame g_sp                         //     store regwin
-	rotate_left g1 g2                        //     g1 = 1 << (cwp + 1)
+	rotate_left g1 g2                        //     g1_prev =<< 1
                                              //
 	b 3b                                     //
 	 nop                                     // }
 
-4:	// loop_end
-
-	sub %g_sp, Stack_frame_sz, %g_sp         // preserve space for Stack_frame
+4:	// loop2_end
 
 	mov %g_nwim, %wim                        // set new wim defined above
 	mov %g_psr, %psr                         // return to trap window by restoring the psr
-	 nop; nop; // nop;                       // it is important to use it two instructions below
+	 nop; nop; nop                           // important 3 nops to use %sp below
+
+	mov %g_sp, %sp                           // now SP point to preserved space for WOF
+	sub %sp, Stack_frame_sz, %sp             // preserve space for Stack_frame
 
 	b 7f                                     // set SP and go to end of macro
-	 mov %g_sp, %sp                          // now SP point to preserved space for WOF
+	 nop
 
 	// UNDEF GLOBAL ALIASES
 	#undef g_nwim
@@ -388,10 +304,6 @@
 	bz 6f
 	 nop
 
-	DBG_ADD_LOG  irqSave \scratch \scratch_sp
-
-	#if 1 // hw
-
 	rotate_right  t_wim \scratch             // new WIM value
 	mov %t_wim, %wim                         // set new WIM
 	// nop; nop; nop                         // 3 delay slots, but don't need here
@@ -400,17 +312,7 @@
 	store_frame  sp                          // store window to stack
 	restore                                  // go back to trap window
 
-	#else // hw and emu  TODO:  check and optimize me
-
-	save                                     // go to dirty window
-	store_frame_and_update_wim  sp           // store window to stack and wim--
-	restore                                  // go back to trap window
-
-	#endif
-
 6:	// skip_flushing_regwin
-
-	// ~IS_IT_NEED
 
 	// USE:  LOCALS and OUTPUTS
 
@@ -425,18 +327,36 @@
 
 //--------------------------------------------------------------------------------------------------
 // Used for inst/data-exception, syscall, irq.
-.macro exception_exit  scratch scratch_sp
+.macro exception_exit  scratch scratch_sp force_eexit_user=0
 
+	.if \force_eexit_user
 	// will the rett land us in user mode ?
 	btst 0x40, %t_psr
 	bne 7f
 	 nop
+	.endif
 
 1:	// eexit_user
 
 	// USE:  GLOBALS and LOCALS (t_xxx and scratch)
 
-	// STEP 1:  restore user regwins
+	// STEP 1:  restore t_wim/t_pc/t_npc/t_psr.(ef|cwp), it may be changed by kernel
+
+	// psr mask:  icc, ef, cwp --> bits [23..20,12,4..0] --> 0xf0101f
+	#define Update_psr_mask 0xf0101f
+	#define offset (Stack_frame_sz + 7*Regwin_frame_sz + Global_frame_sz + Syscall_frame_sz)
+
+	ld [%sp + offset +  0], %t_tmp3     // new_psr
+	set Update_psr_mask, %\scratch      // prepare update mask
+	and %t_tmp3, %\scratch, %t_tmp3     // cut update bits from new_psr
+	andn %t_psr, %\scratch, %t_psr      // clear update bits in old_psr
+	or %t_psr, %t_tmp3, %t_psr          // old_psr |= new_psr
+
+	ld [%sp + offset +  4], %t_wim
+	ld [%sp + offset +  8], %t_pc
+	ld [%sp + offset + 12], %t_npc
+
+	// STEP 2:  restore user regwins
 
 	// DEFINE GLOBAL ALIASES (g1 and g2 use as scratch)
 	#define g_tcwp     g3
@@ -445,7 +365,7 @@
 	#define g_psr      g6
 	#define g_sp       g7
 
-	// Step 1.1:  save state in globals
+	// Step 2.1:  save state in globals
 
 	mov %psr, %g_psr                         // current CWP, for assertion below
 	and %t_psr, 0x1f, %g_tcwp                // trap-entry CWP
@@ -456,12 +376,18 @@
 	// some assertions
 	assert_prev_win_is_invalid  g_psr g1 g2
 
-	// Step 1.2:  disable WIM traps
+	#if USE_FIXED_REGWINS_AREA
+	set tmp_end_of_rgwins, %g1
+	add %g_sp, 7*Regwin_frame_sz, %g2        // store pointer of regwins area
+	st %g2, [%g1]                            // tmp_end_of_rgwins = sp + 7 * regwins_sz
+	#endif
+
+	// Step 2.2:  disable WIM traps
 	mov %g0, %wim                            // don't wait 3 delay slots here
 
 	// USE:  only GLOBALS
 
-	// Step 1.3:  set CWP to initial position for restoring of windows, and set WIM
+	// Step 2.3:  set CWP to initial position for restoring of windows, and set WIM
 
 	get_wim_for_cwp_plus_one  g_tcwp g2 g1   // g1 = 1 << (tpsr.cwp + 1)
 
@@ -472,7 +398,7 @@
 	 nop                                     //
                                              //
 	decrement_cwp  g_tcwp                    //     tcwp--
-	rotate_right  g1 g2                      //     twim >>
+	rotate_right  g1 g2                      //     twim >> 1
 	b 2b                                     //
 	 save                                    //     cwp--
 	                                         // }
@@ -481,7 +407,7 @@
 
 	mov %psr, %g_psr                         // save CWP in globals to set WIM below
 
-	// Step 1.4:  restore user windows
+	// Step 2.4:  restore user windows
 
 4:	// loop2_start
 
@@ -495,16 +421,20 @@
 	b 4b                                     //
 	 add %g_sp, Regwin_frame_sz, %g_sp       //     set next regwin frame
                                              // }
-
 5:	// loop2_end
 
 	// now we got back into trap window, and may set new WIM
 
-	// Step 1.5:  set new WIM
-	get_wim_for_cwp_plus_one  g_psr g2 g1    // g1 = 1 << (cwp + 1)
-	mov %g1, %wim
+	// Step 2.5:  set new WIM
+	get_wim_for_cwp_plus_one  g_psr g2 t_wim    // t_wim = 1 << (cwp + 1)  // note:  use t_wim !
+	mov %t_wim, %wim
 
+	#if USE_FIXED_REGWINS_AREA
+	set tmp_end_of_rgwins, %g1
+	ld [%g1], %\scratch_sp                   // set pointer to end of regwins area
+	#else
 	mov %g_sp, %\scratch_sp
+	#endif
 
 	// UNDEF GLOBAL ALIASES
 	#undef g_tcwp
@@ -514,28 +444,6 @@
 	#undef g_sp
 
 	// USE:  GLOBALS and LOCALS
-
-	// STEP 2:  restore floats if need
-	/*
-	srl %t_psr, 12, %g1                      // psr.ef is bit #12
-	btst 0x1, %g1                            // check psr.ef
-	be 6f                                    // skip if bit is not set
-	 nop
-
-	// enable float operations, may be already enabled
-	mov %psr, %g1
-	set 0x1000, %g2
-	or %g1, %g2, %g1
-	mov %g1, %psr
-	 nop; nop; nop
-
-	restore_floats \scratch_sp
-	//add %\scratch_sp, Float_frame_sz, %\scratch_sp
-	*/
-
-6:	// skip_floats
-
-	add %\scratch_sp, Float_frame_sz, %\scratch_sp
 
 	// STEP 3:  restore globals
 	restore_globals \scratch_sp \scratch
@@ -547,18 +455,15 @@
 	restore_syscall_frame \scratch_sp
 	add %\scratch_sp, Syscall_frame_sz, %\scratch_sp
 
-	// STEP X:  restore t_psr, it may be changed by kernel
-	ld [%\scratch_sp], %t_psr
+	// STEP 5:  proc status frame already resored, skip it
 	add %\scratch_sp, Proc_status_frame_sz, %\scratch_sp
 
-	// STEP 5:  set kernel SP for current thread and go to end of macro
+	// STEP 6:  set kernel SP for current thread and go to end of macro
 	sethi %hi(cur_ksp), %\scratch
 	b 9f
 	 st %\scratch_sp,  [ %\scratch + %lo(cur_ksp) ]
 
 7:	// eexit_kernel
-
-	//ta 0 // for debug, I don't expece exceptions in kernel mode
 
 	// USE:  GLOBALS and LOCALS (t_xxx and scratch)
 
@@ -571,21 +476,6 @@
 	bz 8f
 	 nop
 
-	DBG_ADD_LOG  irqRestore g1 g2
-
-	#if 0 // hw only
-
-	mov %wim, %t_wim
-	rotate_left  t_wim, \scratch             // new WIM value
-	mov %t_wim, %wim                         // set new WIM
-	 nop; nop; nop                           // 3 delay slots, all need here
-
-	restore                                  // go to window to restore
-	restore_frame  sp                        // restore window from kstack
-	save                                     // go back to trap window
-
-	#else // hw and emu  TODO:  check and optimize me
-
 	mov %wim, %t_wim
 	rotate_left  t_wim, \scratch             // new WIM value
 	mov %g0, %wim                            // set new WIM
@@ -597,8 +487,6 @@
 
 	mov %t_wim, %wim                         // set new WIM
 	 nop; nop; nop                           // 3 delay slots, all need here
-
-	#endif
 
 8:	// skip_restoring_regwin
 
@@ -698,8 +586,8 @@ leon_traphandlers:                           // description                prio 
 	BAD_TRAP_16    0x60                                                      //  0x60
 	BAD_TRAP_16    0x70                                                      //  0x70
 	BAD_TRAP_16    0x80                                                      //  0x80
-	TRAP syscall_trap                                                        //  0x90
-	BAD_TRAP       0x91                                                      //  0x91
+	BAD_TRAP       0x90                                                      //  0x90
+	TRAP syscall_trap                                                        //  0x91
 	BAD_TRAP       0x92                                                      //  0x92
 	BAD_TRAP       0x93                                                      //  0x93
 	BAD_TRAP_4     0x94                                                      //  0x94
@@ -740,57 +628,204 @@ bad_trap:
 	mov %t_psr, %psr
 	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
 
-	jmp %t_pc
+	jmpl %t_pc, %g0
 	 rett %t_npc
 
 //--------------------------------------------------------------------------------------------------
 // valid regs:  t_psr, t_pc, t_npc, t_wim
 window_overflow:
 
-	DBG_ADD_LOG  wofEntry t_tmp1 t_tmp2
-
-	#if 0 // hw only
-
-	rotate_right  t_wim t_tmp1               // new WIM value
-	mov %t_wim, %wim                         // set new WIM
-	// nop; nop; nop                         // 3 delay slots, but don't need here
-
-	save                                     // go to dirty window
-	store_frame  sp                          // store window to stack
-	restore                                  // go back to trap window
-
-	#else // hw and emulators (qemu, tsim)
+#if 0 // very OLD
 
 	save                                     // go to dirty window
 	store_frame_and_update_wim  sp           // store window to stack and wim--
 	restore                                  // go back to trap window
 
-	#endif
-
-	DBG_ADD_LOG  wofExit t_tmp1 t_tmp2
-
 	jmp %t_pc                                // go back to trapped instruction SAVE
 	 rett %t_npc
+
+#endif
+
+#if 0 // OLD
+
+	// store original %g1 and %g2 to use it
+	mov  %g1, %t_tmp1
+	mov  %g2, %t_tmp2
+
+	// calc new wim and store it in %g1
+	rd   %wim, %g1
+	rotate_right  g1 t_tmp3
+
+	// goto window to store
+	save
+
+	// re-enable traps and disable irq to allow page faults
+	rd  %psr, %g2
+	or  %g2, 0xf20, %g2
+	wr  %g2, %psr
+
+	// store window
+	store_frame  sp
+
+	// disable traps
+	and %g2, ~0x20, %g2
+	wr  %g2, %psr
+
+	// set new wim
+	wr  %g1, %wim
+	 nop; nop; nop
+
+	// go back to tap window and resore %g1 and %g2
+	restore
+	mov  %t_tmp1, %g1
+	mov  %t_tmp2, %g2
+
+	mov %t_psr, %psr
+	 nop; nop; //nop                         // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction SAVE
+	 rett %t_npc
+
+#else // NEW
+
+	btst 0x40, %t_psr                        // did trap in user mode ?
+	be 2f                                    // go to usr
+	 nop
+
+1:  // krn wof
+
+	// store original %g1 and %g2 to use it
+	mov  %g1, %t_tmp1
+	mov  %g2, %t_tmp2
+
+	// calc new wim and store it in %g1
+	rd   %wim, %g1
+	rotate_right  g1 t_tmp3
+
+	// go to window to store
+	save
+
+	// re-enable traps and disable irq to allow page faults
+	rd  %psr, %g2
+	or  %g2, 0xf20, %g2
+	wr  %g2, %psr
+
+	// store window
+	store_frame  sp
+
+	// disable traps
+	and %g2, ~0x20, %g2
+	wr  %g2, %psr
+
+	// set new wim
+	wr  %g1, %wim
+	 nop; nop; nop
+
+	// go back to tap window and resore %g1 and %g2
+	restore
+	mov  %t_tmp1, %g1
+	mov  %t_tmp2, %g2
+
+	mov %t_psr, %psr
+	 nop; nop; //nop                         // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction SAVE
+	 rett %t_npc
+
+2:  // usr wof
+
+	mov %g0, %wim                            // disable window traps
+	 nop; nop; nop                           // 3 delay slots, but here enough 2 nop's
+
+	set 0x300, %t_tmp1                       // address of MMU.fsr
+	lda [ %t_tmp1 ] 0x19, %g0                // clear MMU.fsr
+
+	lda [ %g0 ] 0x19, %t_tmp1                // read MMU.ctrl
+	or %t_tmp1, 0x2, %t_tmp1                 // turn on no-fault bit
+	sta %t_tmp1, [ %g0 ] 0x19                // set new MMU.ctrl
+
+	save                                     // go to window to save
+	store_frame  sp                          // store window to stack
+	restore                                  // go back to trap window
+
+	lda [ %g0 ] 0x19, %t_tmp1                // read MMU.ctrl
+	andn %t_tmp1, 0x2, %t_tmp1               // turn off no-fault bit
+	sta %t_tmp1, [ %g0 ] 0x19                // set new MMU.ctrl
+
+	set 0x300, %t_tmp1                       // address of MMU.fsr
+	lda [ %t_tmp1 ] 0x19, %t_tmp1            // read MMU.fsr
+
+	andcc %t_tmp1, 0x2, %g0                  // did fault occur ?
+	bne 3f                                   // yes -> go to pfault processing
+	 nop
+
+	// no pfault, exit
+
+	rotate_right  t_wim, t_tmp1              // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	 nop; nop; nop                           // 3 delay slots
+
+	mov %t_psr, %psr                         // restore psr
+	 nop; nop; //nop                         // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction RESTORE
+	 rett %t_npc
+
+3:	// pfault in usr wof
+
+	exception_entry  t_tmp1 t_tmp2 1         // do exception entry as for user entry
+
+	// re-enable traps and disable irqs
+	or %t_psr, 0xf20, %t_tmp1
+	wr %t_tmp1, %psr
+
+// TEST ME
+set 0x400, %o0                           // address of MMU.fsr
+lda [ %o0 ] 0x19, %o0                    // load MMU.fsr into 1st argument
+set 0x300, %o1                           // address of MMU.far
+lda [ %o1 ] 0x19, %o1                    // load MMU.far into 2nd argument
+mov %t_pc, %o2                           // load faulting instruction into 3rd argument
+call sparc_test_me;  nop
+
+	set 0x400, %o0                           // address of MMU.fsr
+	lda [ %o0 ] 0x19, %o0                    // load MMU.fsr into 1st argument
+
+	set 0x300, %o1                           // address of MMU.far
+	lda [ %o1 ] 0x19, %o1                    // load MMU.far into 2nd argument
+
+	mov %t_pc, %o2                           // load faulting instruction into 3rd argument
+	set 1, %o3                               // pfault place WOF
+
+	// do high-level stuff
+	call sparc_entry_pagefault
+	 nop
+
+	exception_exit  t_tmp1 t_tmp2 1          // do exception exit as for user entry
+
+	// re-store window
+	save                                     // go to window to save
+	store_frame  sp                          // store window to stack
+	restore                                  // go back to trap window
+
+	rotate_right  t_wim, t_tmp1              // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	// nop; nop; nop                         // 3 delay slots, but here enough 0 nop's
+
+	// return
+	get_psr_for_return  t_psr t_tmp1
+	mov %t_psr, %psr
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0
+	 rett %t_npc
+
+#endif
 
 //--------------------------------------------------------------------------------------------------
 // valid regs:  t_psr, t_pc, t_npc, t_wim
 window_underflow:
 
-	DBG_ADD_LOG  wufEntry t_tmp1 t_tmp2
-
-	#if 0 // hw only
-
-	rotate_left  t_wim, t_tmp1               // new WIM value
-	mov %t_wim, %wim                         // set new WIM
-	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
-
-	restore                                  // go to window to restore
-	restore                                  //
-	restore_frame  sp                        // restore window from stack
-	save                                     //
-	save                                     // go back to trap window
-
-	#else // hw and emulator (qemu, tsim)   TODO:  optimize me, see pike or other
+#if 0 // very OLD
 
 	mov %g0, %wim                            // disable window traps
 	 nop; nop; nop                           // 3 delay slots, but here enough 2 nop's
@@ -805,18 +840,160 @@ window_underflow:
 	mov %t_wim, %wim                         // set new WIM
 	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
 
-	#endif
-
-	DBG_ADD_LOG  wufExit t_tmp1 t_tmp2
-
 	jmp %t_pc                                // go back to trapped instruction RESTORE
 	 rett %t_npc
+
+#endif
+
+#if 0 // OLD
+
+	mov %g0, %wim                            // disable window traps
+	// nop; nop; nop                         // 3 delay slots, but here not need
+
+	// re-enable traps and disable irq to allow page faults
+	rd  %psr, %t_tmp1
+	or  %t_tmp1, 0xf20, %t_tmp1
+	wr  %t_tmp1, %psr
+	 nop; // nop; nop;                       // 3 delay slots, but here enough 1 nop
+
+	restore                                  // go to window to restore
+	restore                                  //
+	restore_frame  sp                        // restore window from stack
+	save                                     //
+	save                                     // go back to trap window
+
+	rotate_left  t_wim, t_tmp1               // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	// nop; nop; nop                         // 3 delay slots, but here not need
+
+	mov %t_psr, %psr
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction RESTORE
+	 rett %t_npc
+
+#else // NEW
+
+	btst 0x40, %t_psr                        // did trap in user mode ?
+	be 2f                                    // go to usr
+	 nop
+
+1:  // krn wuf
+
+	mov %g0, %wim                            // disable window traps
+	// nop; nop; nop                         // 3 delay slots, but here enough 0 nop's
+
+	// re-enable traps and disable irq to allow page faults
+	rd  %psr, %t_tmp1
+	or  %t_tmp1, 0xf20, %t_tmp1
+	wr  %t_tmp1, %psr
+	 nop; // nop; nop                        // 3 delay slots, but here enough 1 nop
+
+	restore                                  // go to window to restore
+	restore                                  //
+	restore_frame  sp                        // restore window from stack
+	save                                     //
+	save                                     // go back to trap window
+
+	rotate_left  t_wim, t_tmp1               // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	// nop; nop; nop                         // 3 delay slots, but here not need
+
+	mov %t_psr, %psr                         // restore psr
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction RESTORE
+	 rett %t_npc
+
+2:  // usr wuf
+
+	mov %g0, %wim                            // disable window traps
+	// nop; nop; nop                         // 3 delay slots, but here not need
+
+	set 0x300, %t_tmp1                       // address of MMU.fsr
+	lda [ %t_tmp1 ] 0x19, %g0                // clear MMU.fsr
+
+	lda [ %g0 ] 0x19, %t_tmp1                // read MMU.ctrl
+	or %t_tmp1, 0x2, %t_tmp1                 // turn on no-fault bit
+	sta %t_tmp1, [ %g0 ] 0x19                // set new MMU.ctrl
+
+	restore                                  // go to window to restore
+	restore                                  //
+	restore_frame  sp                        // restore window from stack
+	save                                     //
+	save                                     // go back to trap window
+
+	lda [ %g0 ] 0x19, %t_tmp1                // read MMU.ctrl
+	andn %t_tmp1, 0x2, %t_tmp1               // turn off no-fault bit
+	sta %t_tmp1, [ %g0 ] 0x19                // set new MMU.ctrl
+
+	set 0x300, %t_tmp1                       // address of MMU.fsr
+	lda [ %t_tmp1 ] 0x19, %t_tmp1            // read MMU.fsr
+
+	andcc %t_tmp1, 0x2, %g0                  // did fault occur ?
+	bne 3f                                   // yes -> go to pfault processing
+	 nop
+
+	// no pfault, exit
+
+	rotate_left  t_wim, t_tmp1               // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	// nop; nop; nop                         // 3 delay slots, but here not need
+
+	mov %t_psr, %psr                         // restore psr
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0                          // go back to trapped instruction RESTORE
+	 rett %t_npc
+
+3:	// pfault in usr wuf
+
+	exception_entry  t_tmp1 t_tmp2 1         // do exception entry as for user entry
+
+	set 0x400, %o0                           // address of MMU.fsr
+	lda [ %o0 ] 0x19, %o0                    // load MMU.fsr into 1st argument
+
+	set 0x300, %o1                           // address of MMU.far
+	lda [ %o1 ] 0x19, %o1                    // load MMU.far into 2nd argument
+
+	mov %t_pc, %o2                           // load faulting instruction into 3rd argument
+	set 2, %o3                               // pfault place WUF
+
+	// re-enable traps and disable irqs
+	or %t_psr, 0xf20, %t_tmp1
+	wr %t_tmp1, %psr
+
+	// do high-level stuff
+	call sparc_entry_pagefault
+	 nop
+
+	exception_exit  t_tmp1 t_tmp2 1          // do exception exit as for user entry
+
+	// set new wim to restore window         // note:  t_wim may be changed in exception_exit
+	rotate_left  t_wim, t_tmp1               // new WIM value
+	mov %t_wim, %wim                         // set new WIM
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	// re-load window
+	restore                                  // go to window to restore
+	restore                                  //
+	restore_frame  sp                        // restore window from stack
+	save                                     //
+	save                                     // go back to trap window
+
+	// return
+	get_psr_for_return  t_psr t_tmp1
+	mov %t_psr, %psr
+	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
+
+	jmpl %t_pc, %g0
+	 rett %t_npc
+
+#endif
 
 //--------------------------------------------------------------------------------------------------
 // valid regs:  t_psr, t_pc, t_npc, t_wim, t_irq
 irq_trap:
-
-	DBG_ADD_LOG  irqEntry t_tmp1 t_tmp2
 
 	exception_entry  t_tmp1 t_tmp2
 
@@ -830,14 +1007,12 @@ irq_trap:
 
 	exception_exit  t_tmp1 t_tmp2
 
-	DBG_ADD_LOG  irqExit t_tmp1 t_tmp2
-
 	// return
 	get_psr_for_return  t_psr t_tmp1
 	mov %t_psr, %psr
 	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
 
-	jmp %t_pc
+	jmpl %t_pc, %g0
 	 rett %t_npc
 
 //--------------------------------------------------------------------------------------------------
@@ -854,12 +1029,19 @@ inst_access_exception:
 //--------------------------------------------------------------------------------------------------
 // valid regs:  t_psr, t_pc, t_npc, t_wim
 data_access_exception:
-
-
+/**/
+	// did exceptions occur in user ?
+	btst 0x40, %t_psr
+	be 1f
+	 nop
+	b data_pfault_in_kernel_mode             // go to bug processing
+1:
+/*~*/
 	exception_entry  t_tmp1 t_tmp2
 
 	set 0x400, %t_tmp1                       // address of MMU fault address register
 	lda [ %t_tmp1 ] 0x19, %o0                // load fault address into 1st argument
+
 
 mmu_exception_continue:
 
@@ -867,6 +1049,7 @@ mmu_exception_continue:
 	lda [ %t_tmp1 ] 0x19, %o1                // load status register into 2nd argument
 
 	mov %t_pc, %o2                           // load faulting instruction into 3rd argument
+	set 3, %o3                               // pfault place PF
 
 	// re-enable traps and disable irqs
 	or %t_psr, 0xf20, %t_tmp1
@@ -876,10 +1059,6 @@ mmu_exception_continue:
 	call sparc_entry_pagefault
 	 nop
 
-	// only need to restore the entry frame if we make changes
-	// to its content during pagefault handling
-	// otherwise, the register will be restored by an underflow
-	// trap anyway
 	exception_exit  t_tmp1 t_tmp2
 
 	// return
@@ -887,8 +1066,41 @@ mmu_exception_continue:
 	mov %t_psr, %psr
 	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
 
-	jmp %t_pc
+	jmpl %t_pc, %g0
 	 rett %t_npc
+
+
+// pfault in kernel mode is сonsequence of bugs,
+// one of bugs may kstack overflow,
+// to allow execute C-code and dump this error we
+// set new kpfault stack and invalidate of all regwindows
+data_pfault_in_kernel_mode:
+
+	// invalidate all windows
+	get_wim_for_cwp_plus_one t_psr t_tmp1 t_tmp2 // t_tmp2 = 1 << (cwp + 1)
+	mov %t_tmp2, %wim                        // wim = %wim, 3 delay slots
+
+	// set stack pointer and reserve stack frame
+	set kpfault_stack, %sp
+	sub %sp, Stack_frame_sz, %sp
+
+	set 0x400, %t_tmp1                       // address of MMU fault address register
+	lda [ %t_tmp1 ] 0x19, %o0                // load fault address into 1st argument
+
+	set 0x300, %t_tmp1                       // address of MMU fault status register
+	lda [ %t_tmp1 ] 0x19, %o1                // load status register into 2nd argument
+
+	mov %t_pc, %o2                           // load faulting instruction into 3rd argument
+	set 4, %o3                               // pfault place KPF
+
+	// re-enable traps and disable irqs
+	or %t_psr, 0xf20, %t_tmp1
+	wr %t_tmp1, %psr
+
+	// do high-level stuff to call panic()
+	call sparc_entry_pagefault
+	 nop
+
 
 //--------------------------------------------------------------------------------------------------
 // valid regs:  t_psr, t_pc, t_npc, t_wim
@@ -912,8 +1124,8 @@ syscall_trap:
 	mov %t_psr, %psr
 	 nop; nop; // nop                        // 3 delay slots, but here enough 2 nop's
 
-	jmp %t_npc
-	 rett %t_npc + 4
+	jmpl %t_pc, %g0
+	 rett %t_npc
 
 
 .section .data
@@ -926,6 +1138,13 @@ timer_va:          .long 0  // timer virtual address, it needs for time accounti
 cur_kentry_start:  .long -1 // kernel entry timer value for current thread
 cur_kexit_end:     .long -1 // kernel exit  timer value for current thread
 
+tmp_end_of_rgwins: .long 0
+
+
+.align 8
+.space 0x1000
+kpfault_stack:
+
 //--------------------------------------------------------------------------------------------------
 // low-level entry point
 .section .bootstrap  // work at phys addresses
@@ -937,15 +1156,14 @@ _start:
 	wr %g2, %tbr
 
 	// set initial PSR and WIM
-	mov 0xfe0, %psr        // irq_off, supervisor, trap_on, CWP=0, 3 delay slots
+	mov 0xfe0, %psr        // irq_off, supervisor, trap_on, CWP=0
+	// nop; nop; nop       // 3 delay slots, but here not need
 	mov 2, %wim            // set invalid windows #1
-	nop; nop               // wait for the PSR (cwp!) updating is complete
+	 nop; nop // nop       // 3 delay slots, but here enough 2 nop's
 
 	// set stack pointer and reserve stack frame
 	set bootstrap_stack, %sp
 	sub %sp, Stack_frame_sz, %sp
-
-	DBG_INIT_LOG l0 l1
 
 	call bootstrap
 	 nop

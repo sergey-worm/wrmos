@@ -9,6 +9,7 @@
 
 #include "kmem.h"
 #include "kkip.h"
+#include "wlibc_assert.h"
 
 //--------------------------------------------------------------------------------------------------
 class Task_t
@@ -39,13 +40,18 @@ public:
 		_utcb_area = L4_fpage_t::create_nil();
 		_name[0] = 0;
 
-		#if defined (Cfg_arch_arm) or defined (Cfg_arch_x86) or defined (Cfg_arch_x86_64)
+		#if defined (Cfg_arch_arm) or defined (Cfg_arch_x86) or defined (Cfg_arch_x86_64)  or defined (Cfg_arch_sparc)
 		// for arm utcb address locates at 0xff000000
 		// for x86 utcb address locates at %gs:0, use 0xff000000 for it
 		// TODO:  one page per CPU is enough I think
 		addr_t kupage_va = kmem_alloc(Cfg_page_sz, Cfg_page_sz);
 		paddr_t kupage_pa = kmem_paddr(kupage_va, Cfg_page_sz);
+		#if 1
+		// FIXME:  use kernal map, now bug
 		map(0xff000000, kupage_pa, Cfg_page_sz, Acc_kw_ur, Cachable);
+		#else
+		_aspace.kmap(0xff000000, kupage_pa, Cfg_page_sz, Acc_kw_ur, Cachable);
+		#endif
 		// FIXME:  for x86_64 think about address
 		#endif
 
@@ -59,33 +65,31 @@ public:
 		_name[len] = '\0';
 	}
 
-	const char* name()
-	{
-		return _name;
-	}
+	const char* name()  const { return _name; }
+	unsigned id()       const { return _id;   }
 
-	inline L4_thrid_t redirector()   { return _redirector;  }
-	inline unsigned threads_max()    { return _threads_max; }
-	inline unsigned threads_active() { return _threads_act; }
+	inline L4_thrid_t redirector()   const { return _redirector;  }
+	inline unsigned threads_max()    const { return _threads_max; }
+	inline unsigned threads_active() const { return _threads_act; }
 
 	inline void redirector(L4_thrid_t r) { _redirector = r; }
 
 	void map(addr_t va, paddr_t pa, size_t sz, kacc_t acc, unsigned cachable)
 	{
-		printk("Task::map:  id=%d, va=0x%08lx, pa=0x%llx, sz=0x%08x, acc=%s.\n",
-			_id, va, pa, sz, Aspace::Type(acc, cachable).str());
+		printk("Task::map:  id=%d, va=0x%08lx, pa=0x%llx, sz=0x%08zx, acc=%s.\n",
+			_id, va, (long long)pa, sz, Aspace::Type(acc, cachable).str());
 		_aspace.map(va, pa, sz, acc, cachable);
 	}
 
 	void unmap(addr_t va, size_t sz)
 	{
-		printk("Task::unmap:  id=%d, va=0x%08lx, sz=0x%lx.\n", _id, va, sz);
+		printk("Task::unmap:  id=%d, va=0x%08lx, sz=0x%zx.\n", _id, va, sz);
 		_aspace.unmap(va, sz);
 	}
 
 	paddr_t walk(addr_t va, size_t sz)
 	{
-		printk("Task::walk:  id=%d, va=0x%08lx, sz=0x%lx.\n", _id, va, sz);
+		printk("Task::walk:  id=%d, va=0x%08lx, sz=0x%zx.\n", _id, va, sz);
 		return _aspace.walk(va, sz);
 	}
 
@@ -110,14 +114,14 @@ public:
 
 	inline void kip_area(L4_fpage_t fpage)
 	{
-		assert(!_threads_act);
-		assert(!fpage.is_nil());
+		wassert(!_threads_act);
+		wassert(!fpage.is_nil());
 		_kip_area  = fpage;
 	}
 
 	inline void utcb_area(L4_fpage_t fpage)
 	{
-		assert(!_threads_act);
+		wassert(!_threads_act);
 		_utcb_area = fpage;
 		_threads_max = fpage.size() / Cfg_page_sz;
 	}
@@ -127,7 +131,7 @@ public:
 	// alloc utcb area for next thread
 	inline addr_t alloc_utcb_area()
 	{
-		assert(_utcb_area.addr() && _utcb_area.size());
+		wassert(_utcb_area.addr() && _utcb_area.size());
 		return _threads_act < _threads_max  ?  _utcb_area.addr() + _threads_act * Cfg_page_sz  :  0;
 	}
 
@@ -141,11 +145,11 @@ public:
 		if (!_threads_act)
 		{
 			// aspace should be already configured
-			assert(_kip_area.addr() && _kip_area.size());
+			wassert(_kip_area.addr() && _kip_area.size());
 			map_kip();
 		}
-		assert(_utcb_area.addr() && _utcb_area.size());
-		assert(_threads_act < _threads_max);
+		wassert(_utcb_area.addr() && _utcb_area.size());
+		wassert(_threads_act < _threads_max);
 		_threads_act++;
 	}
 
@@ -195,7 +199,7 @@ public:
 //--------------------------------------------------------------------------------------------------
 class Tasks_t
 {
-	typedef list_t <Task_t, 8> tasks_t;
+	typedef list_t <Task_t, 16> tasks_t;
 	static tasks_t _tasks;
 
 public:

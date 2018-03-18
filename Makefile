@@ -4,7 +4,8 @@
 #
 ####################################################################################################
 
-echo=/bin/echo -e
+SHELL = /bin/bash
+echo  = /bin/echo -e
 
 color_off      =\e[0m
 color_black    =\e[0;30m
@@ -48,9 +49,9 @@ help:
 	@echo "  make clean   P=<path/*.prj> B=<build-dir> [ E=<external-dir> ]"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build   P=cfg/hello-qemu-leon3.prj B=../build-hello -j"
-	@echo "  make rebuild P=cfg/hello-qemu-leon3.prj B=../build-hello"
-	@echo "  make clean   P=cfg/hello-qemu-leon3.prj B=../build-hello"
+	@echo "  make build   P=cfg/prj/hello-qemu-leon3.prj B=../build-hello -j"
+	@echo "  make rebuild P=cfg/prj/hello-qemu-leon3.prj B=../build-hello"
+	@echo "  make clean   P=cfg/prj/hello-qemu-leon3.prj B=../build-hello"
 	@echo ""
 
 
@@ -92,7 +93,7 @@ clean-os:
 	$(v)make clean-configs blddir=$B
 	$(v)make clean-libs    blddir=$B
 	$(v)make clean-kernel  blddir=$B gccprefix=$(gccprefix)
-	#$(v)make clean-apps    blddir=$B gccprefix=$(gccprefix)
+	#$(v)make clean-apps   blddir=$B gccprefix=$(gccprefix)
 
 rebuild-os:
 	$(v)make clean-os
@@ -216,7 +217,7 @@ build-apps:
 		fi; \
 		make -C $$dir$$name V=$V blddir=$(blddir)/$$name cfgdir=$(blddir)/config \
 			arch=$(arch) arch_ver=$(arch_ver) dbg=$(app_dbg) wrmdir=$$(pwd) extdir=$(extdir) \
-			gccprefix=$(gccprefix); \
+			gccprefix=$(gccprefix) plt_uart=$(plt_uart); \
 		if [ "$$?" != "0" ]; then exit 10; fi; \
 		echo; \
 	done

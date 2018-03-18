@@ -8,12 +8,14 @@
 #define KDB_H
 
 #include "shell.h"
-#include "processor.h"
 #include "kintc.h"
 #include "ktimer.h"
 #include "threads.h"
 #include "log.h"
 #include "libcio.h"
+#include "sys_proc.h"
+
+extern "C" unsigned long int strtoul(const char* str, char** endptr, int base);
 
 //--------------------------------------------------------------------------------------------------
 static void dprint(const char* fmt, ...)
@@ -82,11 +84,39 @@ static int cmd_cpuusage(unsigned argc, char** argv)
 }
 
 //--------------------------------------------------------------------------------------------------
+// incomming:  [thread_id] [u]
 static int cmd_entry_frame(unsigned argc, char** argv)
 {
-	(void) argc;
-	(void) argv;
-	Sched_t::current()->entry_frame()->dump();
+	bool need_print_usr_mem = false;
+	unsigned thread_id = 0;  // 0 - mean cur thread
+
+	if (argc == 2)
+	{
+		if (!strcmp(argv[1], "u"))
+			need_print_usr_mem = true;
+		else
+			thread_id = strtoul(argv[1], NULL, 0);
+	}
+	else if (argc == 3)
+	{
+		thread_id = strtoul(argv[1], NULL, 0);
+		if (!strcmp(argv[2], "u"))
+			need_print_usr_mem = true;
+	}
+
+	Thread_t* thr = Sched_t::current();
+	if (thread_id)
+		thr = Threads_t::find(thread_id);
+
+	if (thr)
+	{
+		printf(" thread:  name=%s, id=%u:\n", thr->name(), thr->globid().number());
+		thr->entry_frame()->dump(printf, need_print_usr_mem);
+	}
+	else
+	{
+		printf(" Wrong thread_id %u.\n", thread_id);
+	}
 	return 0;
 }
 
@@ -96,13 +126,58 @@ static int cmd_banner(unsigned argc, char** argv)
 	(void) argc;
 	(void) argv;
 	printf("\n");
-	printf("[ldr]   _    _ ___ __  __   ___  ___ \n");
-	printf("[ldr]  | |  | | _ \\  \\/  | / _ \\/ __|\n");
-	printf("[ldr]  | |/\\| |   / |\\/| || (_) \\__ \\\n");
-	printf("[ldr]  |__/\\__|_|_\\_|  |_(_)___/|___/\n");
-	printf("[ldr]          From Russia with love!\n");
-	printf("[ldr]\n");
+	printf("   _    _ ___ __  __   ___  ___ \n");
+	printf("  | |  | | _ \\  \\/  | / _ \\/ __|\n");
+	printf("  | |/\\| |   / |\\/| || (_) \\__ \\\n");
+	printf("  |__/\\__|_|_\\_|  |_(_)___/|___/\n");
+	printf("          From Russia with love!\n");
 	printf("\n");
+	return 0;
+}
+
+//--------------------------------------------------------------------------------------------------
+static int cmd_show_memory(unsigned argc, char** argv)
+{
+	// get inc params
+
+	if (argc < 2  ||  argc > 3)
+	{
+		printf("Use:  mem <addr> [sz]\n");
+		return 0;
+	}
+
+	addr_t addr = strtoul(argv[1], NULL, 0);
+	size_t size = 32;
+
+	if (argc == 3)
+		size = strtoul(argv[2], NULL, 0);
+
+	// read line by line, each line contents 4 long values
+
+	addr_t start = round_down(addr, 4*sizeof(long));
+	addr_t end = round_up(addr + size, 4*sizeof(long));
+
+	for (addr_t a=start; a<end; a+=4*sizeof(long))
+	{
+		unsigned width = 2*sizeof(long);
+		printf("  0x%0*lx:  %0*lx %0*lx %0*lx %0*lx\n",
+			width, a,
+			width, *(long*)(a + 0*sizeof(long)),
+			width, *(long*)(a + 1*sizeof(long)),
+			width, *(long*)(a + 2*sizeof(long)),
+			width, *(long*)(a + 3*sizeof(long)));
+	}
+
+	printf("\n");
+	return 0;
+}
+
+//--------------------------------------------------------------------------------------------------
+static int cmd_show_mapping(unsigned argc, char** argv)
+{
+	unsigned thread_id = argc==2 ? strtoul(argv[1], NULL, 0) : 0;
+	Thread_t* thr = thread_id ? Threads_t::find(thread_id) : Sched_t::current();
+	thr->task()->dump();
 	return 0;
 }
 
@@ -123,6 +198,8 @@ public:
 		_shell.add_cmd("cpuusage",      cmd_cpuusage);
 		_shell.add_cmd("entry_frame",   cmd_entry_frame);
 		_shell.add_cmd("banner",        cmd_banner);
+		_shell.add_cmd("mem",           cmd_show_memory);
+		_shell.add_cmd("mapping",       cmd_show_mapping);
 
 		_shell.prompt("\x1b[1;33mkdb> \x1b[0m");
 	}
@@ -136,7 +213,7 @@ public:
 
 		libcio_set_uart();
 
-		const char* line    = "+--------------------------------------------------------------\n";
+		const char* line    = "+-------------------------------------------------------------------------------\n";
 		const char* color   = "\x1b[1;33m";
 		const char* nocolor = "\x1b[0m";
 		const char* kind    = error_entry ? "Error" : "Debug";

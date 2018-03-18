@@ -6,14 +6,14 @@
 
 blddir    ?= build
 target    ?= libwlibc.a
-files     := string.o ctype.o stdio.o assert.o tests.o
-files     += errno.o stdlib.o unistd.o
+files     := string.o ctype.o stdio.o assert.o panic.o tests.o
+files     += errno.o stdlib.o unistd.o wlibc_cb.o
 files     += fixme.o
 files     += # libm.o  # use libm instead
 objs      := $(addprefix src/,$(files))
 incflags  := -Iinc
 incflags  += -I$(cfgdir)
-incflags  += -I../../lib/l4
+incflags  += -I../../lib/l4/inc
 incflags  += -I../../lib/sys
 incflags  += -I../../lib/sys/$(arch)
 baseflags := -O2 -Wall -Werror
@@ -26,7 +26,6 @@ ifeq ($(arch),x86_64)
 endif
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG

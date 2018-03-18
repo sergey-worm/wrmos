@@ -32,7 +32,6 @@ libs       += $(blddir)/../../lib/wstdc++/libwstdc++.a
 use_libgcc := 1 # for snprintf in libwlibc.a
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG

@@ -13,12 +13,13 @@
 #ifndef MMU_H
 #define MMU_H
 
-#include "types.h"
+#include "sys_types.h"
 
-#if defined (Cfg_debug) && defined (USE_MMU_ASSERT)
-#  define mmu_assert assert
+#if defined (DEBUG) && defined (USE_MMU_ASSERT)
+# include "wlibc_assert.h"
+# define mmu_assert wassert
 #else
-#  define mmu_assert(expr)
+# define mmu_assert(expr)
 #endif
 
 #define mmu_isalign(val, algn)  (!(val & (algn - 1)))

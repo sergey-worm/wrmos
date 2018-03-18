@@ -48,6 +48,7 @@ $(blddir)/config/krn-config.h:  $(cfg_file) $(makefiles)
 	@echo -e "#define Cfg_krn_uart_vaddr ($(kuart_va))"          >> $@
 	@echo -e "#define Cfg_krn_uart_sz $(krn_uart_sz)"            >> $@
 	@echo -e "#define Cfg_krn_uart_bitrate $(krn_uart_bitrate)"  >> $@
+	@echo -e "#define Cfg_krn_uart_irq $(krn_uart_irq)"          >> $@
 	@echo -e "#define Cfg_krn_intc_paddr $(krn_intc_paddr)"      >> $@
 	@echo -e "#define Cfg_krn_intc_sz $(krn_intc_sz)"            >> $@
 	@echo -e "#define Cfg_krn_timer_paddr $(krn_timer_paddr)"    >> $@

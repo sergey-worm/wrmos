@@ -11,6 +11,18 @@
 
 Thread_t* threads_get_highest_prio_ready_thread();
 
+//extern unsigned irq_entry_depth;
+
+/*
+inline void _preemtion_point()
+{
+	if (irq_entry_depth < 2)
+	{
+		//Proc::enable_irq();
+		//Proc::disable_irq();
+	}
+}
+*/
 
 class Sched_t
 {
@@ -21,10 +33,7 @@ private:
 	// get next Ready thread
 	static Thread_t* next()
 	{
-		// TODO:  preemtion point
-		//Proc::enable_irq();
-		//Proc::disable_irq();
-
+		//_preemtion_point();
 		return threads_get_highest_prio_ready_thread();
 	}
 
@@ -49,7 +58,7 @@ public:
 			//printk("%s:  nxt=%s, ra=0x%x.\n", __func__, nxt->name(), ((word_t*)nxt->ksp())[0]);
 			cur->store_floats();
 			current(nxt);
-			cur->context_switch(nxt); // after 'cur' is changed to 'nxt'
+			cur->context_switch(nxt); // after that 'cur' is changed to 'nxt'
 			cur->restore_floats();
 		}
 	}

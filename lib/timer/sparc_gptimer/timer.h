@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint
@@ -35,28 +35,28 @@ enum
 	Scaller_mask        = 0xffff,
 	Scaller_reload_mask = 0xffff,
 
-	Config_ev           = 13,  // external events
-	Config_es           = 12,  // enable set
-	Config_el           = 11,  // enable latching
-	Config_ee           = 10,  // enable external clock source
-	Config_df           =  9,  // disable timer freeze
-	Config_si           =  8,  // separate interrupt for each timer, read-only
-	Config_irq_mask     = 0x1f,// IRQ num for common int, IRQ+n for separate int, read-only
-	Config_irq_shift    =  3,  //
-	Config_timers_mask  = 0x7, // number of implemented timers, read-only
-	Config_timers_shift =  0,  //
+	Config_ev           = 13,       // external events
+	Config_es           = 12,       // enable set
+	Config_el           = 11,       // enable latching
+	Config_ee           = 10,       // enable external clock source
+	Config_df           =  9,       // disable timer freeze
+	Config_si           =  8,       // separate interrupt for each timer, read-only
+	Config_irq_mask     = 0x1f,     // IRQ num for common int, IRQ+n for separate int, read-only
+	Config_irq_shift    =  3,       //
+	Config_timers_mask  = 0x7,      // number of implemented timers, read-only
+	Config_timers_shift =  0,       //
 
-	Control_ws          =  8,  // disable watchdog output
-	Control_wn          =  7,  // enable watchdog NMI
-	Control_dh          =  6,  // debug halt, read-only
-	Control_ch          =  5,  // chain with preceding timer
-	Control_ip          =  4,  // interrupt pending
-	Control_ie          =  3,  // interrupt enable
-	Control_ld          =  2,  // load from Reload to Сounter register
-	Control_rs          =  1,  // restart, when underflow - reload Reload to Counter register
-	Control_en          =  0,  // enable the timer
+	Control_ws          =  1 << 8,  // disable watchdog output
+	Control_wn          =  1 << 7,  // enable watchdog NMI
+	Control_dh          =  1 << 6,  // debug halt, read-only
+	Control_ch          =  1 << 5,  // chain with preceding timer
+	Control_ip          =  1 << 4,  // interrupt pending
+	Control_ie          =  1 << 3,  // interrupt enable
+	Control_ld          =  1 << 2,  // load from Reload to Сounter register
+	Control_rs          =  1 << 1,  // restart, when underflow - reload Reload to Counter register
+	Control_en          =  1 << 0,  // enable the timer
 
-	Ktmr                =  0,  // number of timer for kernel purpose
+	Ktmr                =  0,       // number of timer for kernel purpose
 };
 
 typedef void (*Timer_print_t)(const char* format, ...);
@@ -83,22 +83,10 @@ inline void timer_init(uintptr_t base_addr, Timer_print_t dprint)
 	unsigned timers = num_timers(base_addr);
 	for (unsigned i=0; i<timers; ++i)
 		regs->timer[i].control = 0x0;
-	
+
 	print("Sparc GPTIMER:  %d timers, %s IRQ #%d.\n",
 		timers, regs->config & Config_si ? "separate" : "shared", irq_start(base_addr));
 }
-
-/*
-inline void timer_set(unsigned base_addr, unsigned ticks, unsigned short scaler)
-{
-	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
-	regs->scaler = scaler;
-	regs->scaler_reload = scaler;
-	regs->timer[Ktmr].counter = ticks;
-	regs->timer[Ktmr].reload = ticks;
-	regs->timer[Ktmr].control = (1<<Control_rs) | (1<<Control_ie) | (1<<Control_ld) | (1<<Control_ip);
-}
-*/
 
 inline int timer_set(uintptr_t base_addr, unsigned sysclock_hz, unsigned period_usec)
 {
@@ -110,20 +98,25 @@ inline int timer_set(uintptr_t base_addr, unsigned sysclock_hz, unsigned period_
 	regs->scaler_reload = scaler - 1;
 	regs->timer[Ktmr].counter = ticks - 1;
 	regs->timer[Ktmr].reload = ticks - 1;
-	regs->timer[Ktmr].control = (1<<Control_rs) | (1<<Control_ie) | (1<<Control_ld) | (1<<Control_ip);
+	regs->timer[Ktmr].control = Control_ip;  // clear InterruptPending bit
 	return 0;
 }
 
 inline void timer_start(uintptr_t base_addr)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
-	regs->timer[Ktmr].control |= 1 << Control_en;
+	regs->timer[Ktmr].control = Control_en | Control_rs | Control_ie;
 }
 
 inline void timer_stop(uintptr_t base_addr)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
-	regs->timer[Ktmr].control &= ~(1 << Control_en);
+	// NOTE:  QEMU GPTIMER has bug - timer disabling only if exist
+	//        Control_ld bit, so timer_stop() does not work
+	//
+	// WA (for qemu):  leave IrqEnable to get IRQ pending in Intc,
+	//                 need for process IRQ after SystemClock_t
+	regs->timer[Ktmr].control = Control_ie;
 }
 
 inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock_hz, unsigned reload_usec, unsigned value_reg)
@@ -137,6 +130,12 @@ inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock
 	return ((uint64_t)reload - value) * scaler * Usec_per_sec / sysclock_hz;
 }
 
+inline unsigned timer_raw_value(uintptr_t base_addr)
+{
+	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
+	return regs->timer[Ktmr].counter;
+}
+
 inline uint64_t timer_value_usec(uintptr_t base_addr, unsigned sysclock_hz, unsigned reload_usec)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
@@ -147,9 +146,13 @@ inline void timer_irq_ack(uintptr_t base_addr)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
 	(void) regs;
-	//timer_dump();
-	//regs->timer[Ktmr].control |= 1 << Control_ip; // XXX:  why not need?
-	//timer_dump();
+	#if 1 // WA for qemu gptimer
+	// Nothing
+	// Control reg consist Enable bit and qemu has bug for this bit - reset counter value,
+	// so after cleare Pindong bit we will get cleared Counter value. It is bug.
+	#else
+	regs->timer[Ktmr].control |= Control_ip;
+	#endif
 }
 
 // TODO support separate timer IRQs
@@ -177,9 +180,9 @@ inline void timer_dump(uintptr_t base_addr, Timer_print_t dprint)
 		uint32_t ctrl = regs->timer[i].control;
 		(void)ctrl;
 	   	print("    #%d           %d  %d  %d  %d  %d  %d  %d  %d  %d  rld=%u, cnt=%u, irq=%u\n", i,
-			(ctrl >> Control_en) & 1, (ctrl >> Control_rs) & 1, (ctrl >> Control_ld) & 1,
-			(ctrl >> Control_ie) & 1, (ctrl >> Control_ip) & 1, (ctrl >> Control_ch) & 1,
-			(ctrl >> Control_dh) & 1, (ctrl >> Control_wn) & 1, (ctrl >> Control_ws) & 1,
+			(ctrl & Control_en) ? 1 : 0, (ctrl & Control_rs) ? 1 : 0, (ctrl & Control_ld) ? 1 : 0,
+			(ctrl & Control_ie) ? 1 : 0, (ctrl & Control_ip) ? 1 : 0, (ctrl & Control_ch) ? 1 : 0,
+			(ctrl & Control_dh) ? 1 : 0, (ctrl & Control_wn) ? 1 : 0, (ctrl & Control_ws) ? 1 : 0,
 			regs->timer[i].reload, regs->timer[i].counter, irq_start(base_addr) + i);
 	}
 }

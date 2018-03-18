@@ -161,7 +161,7 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 		{
 			/**/printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
 			/**/	exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
-			/**/eframe->dump();
+			/**/eframe->dump(printf);
 
 			if (eframe->is_krn_entry())
 				panic("exception in kernel mode.");
@@ -172,7 +172,7 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 		{
 			/**/printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
 			/**/	exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
-			/**/eframe->dump();
+			/**/eframe->dump(printf);
 
 			Selector_ecode_t e = eframe->error();
 			printk("ext=%u, tbl=%u/%s, index=%u.\n", e.ext, e.tbl, e.table(), e.index);
@@ -188,7 +188,7 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 			/**/	exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
 			if (eframe->is_krn_entry())
 			{
-				eframe->dump();
+				eframe->dump(printf);
 				panic("Pagefault in kernel mode:  addr=0x%lx, inst=0x%lx.",
 					Proc::cr2(), eframe->syscall_frame.ip());
 			}
@@ -205,7 +205,7 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 		{
 			/**/printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
 			/**/	exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
-			/**/eframe->dump();
+			/**/eframe->dump(printf);
 
 			if (eframe->is_krn_entry())
 				panic("exception in kernel mode.");
@@ -213,9 +213,9 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 				panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
 		}
 		default:
-			printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%x.\n",
+			printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
 				exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
-			eframe->dump();
+			eframe->dump(printf);
 			panic("unknow exception");
 	}
 }
@@ -233,7 +233,7 @@ void scall_handler(unsigned trapno, Entry_frame_t* eframe)
 	if (trapno == 0x80)
 		kentry_syscall();
 	else
-		panic("IMPLME:  scall trap:  trapno=%u, frame=0x%lx.\n", trapno, eframe);
+		panic("IMPLME:  scall trap:  trapno=%u, frame=0x%p.\n", trapno, eframe);
 }
 
 extern "C" void x86_entry_trap(word_t gateno, Entry_frame_t* eframe)

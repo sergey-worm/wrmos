@@ -20,7 +20,7 @@ plat         = qemu
 brd          = qemu_leon3
 sys_clock_hz = 40000000
 ram_start    = 0x40000000
-ram_sz       = 0x800000
+ram_sz       = 0x8000000
 page_sz      = 0x1000
 
 #---------------------------------------------------------------------------------------------------
@@ -33,6 +33,7 @@ krn_tick_usec    = 10000
 krn_uart_paddr   = 0x80000100
 krn_uart_sz      = 0x100
 krn_uart_bitrate = 115200
+krn_uart_irq     = 3
 
 krn_intc_paddr   = 0x80000200
 krn_intc_sz      = 0x100

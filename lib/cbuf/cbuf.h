@@ -7,7 +7,7 @@
 #ifndef CBUF_H
 #define CBUF_H
 
-#include "sys-utils.h"
+#include "sys_utils.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -37,7 +37,15 @@ public:
 		return true;
 	}
 
+	// be careful for multithreadung
+	void clear()
+	{
+		_wp = 0;
+		_rp = 0;
+	}
+
 	// allowed overwriting old data
+	// be careful for multithreadung
 	size_t overwrite(const char* buf, size_t len)
 	{
 		if (!_buf || !_sz)

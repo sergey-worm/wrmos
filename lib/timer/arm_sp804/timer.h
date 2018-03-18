@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint
@@ -139,6 +139,12 @@ inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock
 	uint32_t reload = regs->tmr[Ktmr].load;
 	uint32_t scaler = div_by_pre[(regs->tmr[Ktmr].control >> Control_pre) & Control_pre_mask];
 	return ((uint64_t)reload - value) * scaler * Usec_per_sec / sysclock_hz;
+}
+
+inline unsigned timer_raw_value(uintptr_t base_addr)
+{
+	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
+	return regs->tmr[Ktmr].value;
 }
 
 inline uint64_t timer_value_usec(uintptr_t base_addr, unsigned sysclock_hz, unsigned reload_usec)

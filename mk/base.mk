@@ -26,6 +26,7 @@
 # make options
 MAKEFLAGS += --no-builtin-rules      # disable the built-in implicit rules (printk)
 MAKEFLAGS += --no-builtin-variables  # disable the built-in variable settings
+SHELL     := /bin/bash
 
 # build environment
 gccprefix ?= set-gccprefix-please #$(arch)-linux-

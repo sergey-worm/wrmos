@@ -24,7 +24,7 @@ incflags  := -Iinc
 incflags  += -I$(cfgdir)
 incflags  += -I../sys
 incflags  += -I../sys/$(arch)
-incflags  += -I../l4
+incflags  += -I../l4/inc
 incflags  += -I../list
 incflags  += -I../elfloader
 incflags  += -I../wlibc/inc
@@ -33,7 +33,6 @@ cflags    :=
 cxxflags  := -std=c++11 -fno-rtti -fno-exceptions
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 #else
   baseflags += -DNDEBUG

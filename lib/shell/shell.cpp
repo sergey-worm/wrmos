@@ -43,7 +43,7 @@ void Shell_t::shell()
 	{
 		int c = getchar();
 
-		// printf("c=0x%x\n\n", c);
+		//printf("c=0x%x\n\n", c);
 
 		switch (c)
 		{

@@ -4,7 +4,6 @@
 //
 //##################################################################################################
 
-#include "libc_io.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -13,18 +12,7 @@
 #include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "assert.h"
-
-//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-static Libc_io_callbacks_t io_callbacks;
-
-void libc_init_io(Libc_io_callbacks_t* callbacks)
-{
-	io_callbacks.out_char    = callbacks->out_char;
-	io_callbacks.out_string  = callbacks->out_string;
-	io_callbacks.in_char     = callbacks->in_char;
-}
-//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#include "wlibc_cb.h"
 
 FILE* stdin = 0;
 FILE* stdout = 0;
@@ -958,7 +946,6 @@ int sprintf(char* buf, const char* format, ...)
 
 // output helpers
 static int putsn(const char* str, unsigned len);
-//static int putsn2(const char* str1, unsigned len1, const char* str2, unsigned len2);
 
 int vprintf(const char* format, va_list args)
 {
@@ -1001,17 +988,19 @@ static int putsn(const char* str, unsigned len)
 	if (!len)
 		return 0;
 
-	if (io_callbacks.out_string)
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+
+	if (cb->out_string)
 	{
-		io_callbacks.out_string(str, len);
+		cb->out_string(str, len);
 	}
-	else if (io_callbacks.out_char)
+	else if (cb->out_char)
 	{
 		while (len--)
 		{
-			io_callbacks.out_char(*str);
+			cb->out_char(*str);
 			if (*str == '\n')
-				io_callbacks.out_char('\r');
+				cb->out_char('\r');
 			str++;
 		}
 	}
@@ -1027,11 +1016,13 @@ int fgetc(FILE* stream)
 {
 	(void)stream;
 
-	if (!io_callbacks.in_char)
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+
+	if (!cb->in_char)
 		return 0;
 
 	int c = 0;
-	while (!(c = io_callbacks.in_char()));
+	while (!(c = cb->in_char()));
 	return c;
 }
 
@@ -1040,9 +1031,11 @@ int fputc(int c, FILE* stream)
 {
 	(void)stream;
 
-	if (io_callbacks.out_char)
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+
+	if (cb->out_char)
 	{
-		io_callbacks.out_char(c);
+		cb->out_char(c);
 	}
 	else
 	{

@@ -7,7 +7,7 @@
 #ifndef WRM_MEMORY_H
 #define WRM_MEMORY_H
 
-#include "types.h"
+#include "sys_types.h"
 
 #ifdef __cplusplus
 extern "C" {

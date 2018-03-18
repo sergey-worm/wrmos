@@ -8,7 +8,7 @@
 #define KINTCTRL_H
 
 #include "intc.h"
-#include "assert.h"
+#include <assert.h>
 
 class Intc
 {
@@ -62,7 +62,7 @@ public:
 		assert(_addr != -1);
 		int rc = intc_mask(_addr, irq);
 		(void)rc;
-		assert(!rc && "intc_mask() failed")
+		assert(!rc && "intc_mask() failed");
 	}
 
 	static inline void unmask(unsigned irq)
@@ -70,7 +70,7 @@ public:
 		assert(_addr != -1);
 		int rc = intc_unmask(_addr, irq);
 		(void)rc;
-		assert(!rc && "intc_unmask() failed")
+		assert(!rc && "intc_unmask() failed");
 	}
 
 	static inline void clear(unsigned irq)
@@ -78,7 +78,7 @@ public:
 		assert(_addr != -1);
 		int rc = intc_clear(_addr, irq);
 		(void)rc;
-		assert(!rc && "intc_clear() failed")
+		assert(!rc && "intc_clear() failed");
 	}
 };
 

@@ -8,9 +8,9 @@
 #define TIMER_H
 
 #include <stdint.h>
-#include "processor.h"
+#include "sys_proc.h"
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint
@@ -107,10 +107,15 @@ inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock
 {
 	(void) base_addr;
 	(void) sysclock_hz;
-
 	uint64_t val = value_reg;
 	uint64_t reload_val = (uint64_t)reload_usec * Sys_clock_hz / Usec_per_sec;
 	return (reload_val - val) * Usec_per_sec / Sys_clock_hz;
+}
+
+inline unsigned timer_raw_value(uintptr_t base_addr)
+{
+	(void) base_addr;
+	return _timer_value();
 }
 
 inline uint64_t timer_value_usec(uintptr_t base_addr, unsigned sysclock_hz, unsigned reload_usec)

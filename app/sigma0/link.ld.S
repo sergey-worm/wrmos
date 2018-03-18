@@ -47,16 +47,11 @@ SECTIONS
 		*(.text)
 		*(.text.*)
 
-		. = ALIGN(4);
+		. = ALIGN(8);
 		_ctors_start = .;
-		KEEP(*(.ctors))       /* sparc FIXME */
-		KEEP(*(.init_array))  /* arm   FIXME */
+		KEEP(*(.ctors))       /* sparc, x86 */
+		KEEP(*(.init_array))  /* arm        */
 		_ctors_end = .;
-
-		_dtors_start = .;
-		KEEP(*(.dtors))       /* sparc FIXME */
-		KEEP(*(.fini_array))  /* arm   FIXME */
-		_dtors_end = .;
 
 		_text_end = .;
 		. = ALIGN(page_sz);
@@ -75,32 +70,31 @@ SECTIONS
 	{
 		_data_start = .;
 		*(.data)
-
-		_bss_start = .;
-		*(.bss)
-		*(.bss.*)
-		_bss_end = .;
-
-		/* .got need fo libgcc */
-		_got_start = .;
-		*(.got)
-		_got_end = .;
-
+		*(.got)               /* .got need for libgcc */
 		_data_end = .;
 		. = ALIGN(page_sz);
 	} > load
 
+	.bss :
+	{
+		_bss_start = .;
+		*(.bss)
+		*(.bss.*)
+		_bss_end = .;
+		. = ALIGN(page_sz);
+	} > load
 
 	/DISCARD/ :
 	{
+		*(.dtors)
+		*(.fini_array)
 		*(.note)
 		*(.note.ABI-tag)
 		*(.comment)
 		*(.eh_frame)
 		*(.dummy)
 		*(.debug*)
-
-		*(.ARM.extab*)     /* FIXME arm */
-		*(.ARM.exidx*)     /* FIXME arm */
+		*(.ARM.extab*)     /* arm */
+		*(.ARM.exidx*)     /* arm */
 	}
 }

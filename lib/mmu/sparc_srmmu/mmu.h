@@ -15,12 +15,13 @@
 #ifndef MMU_H
 #define MMU_H
 
-#include "types.h"
+#include "sys_proc.h"
 
-#if defined (Cfg_debug) && defined (USE_MMU_ASSERT)
-#  define mmu_assert assert
+#if defined (DEBUG) && defined (USE_MMU_ASSERT)
+# include "wlibc_assert.h"
+# define mmu_assert wassert
 #else
-#  define mmu_assert(expr)
+# define mmu_assert(expr)
 #endif
 
 #define mmu_isalign(val, algn)  (!(val & (algn - 1)))
@@ -81,13 +82,6 @@ enum
 	Et_mask   = 0x3,
 };
 
-enum Asi
-{
-	Asi_flush_dcache  = 0x11,  // flush dcache only
-	Asi_flush_mmu_tlb = 0x18,  // flush TLB and I/D cache
-	Asi_mmu_reg       = 0x19   // MMU registers
-};
-
 struct Ptd
 {
 	unsigned ptp : 30;
@@ -104,29 +98,17 @@ struct Pte
 	unsigned et  :  2;
 };
 
-inline word_t lda(word_t addr, word_t asi)
-{
-	word_t val;
-	asm volatile ("lda [ %[addr] ] %[asi], %[val]" : [val]"=r"(val) : [addr]"r"(addr), [asi]"i"(asi));
-	return val;
-}
-
-inline void sta(word_t val, word_t addr, word_t asi)
-{
-	asm volatile ("sta %[val], [ %[addr] ] %[asi]" :: [val]"r"(val), [addr]"r"(addr), [asi]"i"(asi));
-}
-
-//-------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------
 
 inline void flush_dcache()
 {
-	sta(0, 0, Asi_flush_dcache);
+	Proc::sta(0, 0, Proc::Asi_flush_dcache);
 }
 
 inline void mmu_tlb_flush()
 {
-	sta(0, 0, Asi_flush_mmu_tlb);
-	//sta(1, 0x400, Asi_flush_mmu_tlb);  // in HelenOS and Embox are used 0x400, why?
+	Proc::sta(0, 0, Proc::Asi_flush_mmu_tlb);
+	//Proc::sta(1, 0x400, Proc::Asi_flush_mmu_tlb);  // in HelenOS and Embox are used 0x400, why?
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -260,38 +242,38 @@ inline void mmu_zero(word_t* tb, unsigned sz_bytes)
 //--------------------------------------------------------------------------------------------------
 inline word_t mmu_reg_ctrl()
 {
-	return lda(Reg_ctrl, Asi_mmu_reg);
+	return Proc::lda(Reg_ctrl, Proc::Asi_mmu_reg);
 }
 
 inline void mmu_reg_ctrl(word_t ctrl)
 {
-	sta(ctrl, Reg_ctrl, Asi_mmu_reg);
+	Proc::sta(ctrl, Reg_ctrl, Proc::Asi_mmu_reg);
 }
 
 // read value of MMU.ctx register
 inline word_t mmu_reg_ctx()
 {
-	return (lda(Reg_ctx, Asi_mmu_reg));
+	return (Proc::lda(Reg_ctx, Proc::Asi_mmu_reg));
 }
 
 // write value to MMU.ctx register
 inline void mmu_reg_ctx(word_t ctx)
 {
 	mmu_assert(ctx <= 0xff);
-	sta(ctx, Reg_ctx, Asi_mmu_reg);
+	Proc::sta(ctx, Reg_ctx, Proc::Asi_mmu_reg);
 }
 
 // read physphys addr of MMU.ctxtb register
 inline word_t mmu_reg_ctxtb()
 {
-	return (lda(Reg_ctxtb, Asi_mmu_reg) << 4);
+	return (Proc::lda(Reg_ctxtb, Proc::Asi_mmu_reg) << 4);
 }
 
 // write phys addr of context_table to MMU.ctxtb register
 inline void mmu_reg_ctxtb(paddr_t ctxtb)
 {
 	mmu_assert(mmu_isalign(ctxtb, 0x400)); // 1024 B for L0 table
-	sta((ctxtb >> 4), Reg_ctxtb, Asi_mmu_reg);
+	Proc::sta((ctxtb >> 4), Reg_ctxtb, Proc::Asi_mmu_reg);
 }
 //--------------------------------------------------------------------------------------------------
 //  ~ MMU registers access

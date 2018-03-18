@@ -4,7 +4,7 @@
 //
 //##################################################################################################
 
-#include "assert.h"
+#include "wlibc_panic.h"
 
 // FIXME:  for SMP need to use TLS
 int* __errno_location(void)
@@ -15,6 +15,6 @@ int* __errno_location(void)
 
 char* strerror(int errnum)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  Implement me!\n", __func__);
 	return 0;
 }

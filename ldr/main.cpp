@@ -5,17 +5,18 @@
 //##################################################################################################
 
 #include "uart.h"
-#include "ramfs.h"
 #include "elfloader.h"
 #include "ldr-config.h"
 #include "list.h"
-#include "sys-utils.h"
-#include "panic.h"
-#include "kip.h"
-#include "libc_io.h"
+#include "sys_utils.h"
+#include "sys_ramfs.h"
+#include "l4_kip.h"
+#include "wlibc_cb.h"
+#include "wlibc_panic.h"
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <assert.h>
 
 #define macro2str(s) str(s)
 #define str(s) #s
@@ -23,14 +24,14 @@
 inline unsigned b2kb(unsigned bytes) { return bytes / 1024; }
 inline unsigned b2mb(unsigned bytes) { return bytes / 1024 / 1024; }
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define dprint printf
 #else
 #  define dprint(...)
 #endif
 
 // for panic()
-extern "C" void break_execution(const char* str = 0)
+static void break_execution(const char* str = 0)
 {
 	(void) str;
 	while (1);
@@ -38,15 +39,15 @@ extern "C" void break_execution(const char* str = 0)
 
 static void ldr_uart_putc(int c)
 {
-	uart_putc(Cfg_ldr_uart_paddr, c);
+	while (!uart_putc(Cfg_ldr_uart_paddr, c));
 }
 
 static void init_io()
 {
-	Libc_io_callbacks_t io;
-	io.out_char    = ldr_uart_putc,
-	io.out_string  = NULL;
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = ldr_uart_putc,
+	cb->out_string = NULL;
+	cb->break_exec = break_execution;
 }
 
 static unsigned dprint_elf(const char* fmt, ...)
@@ -140,12 +141,12 @@ static void add_free_mem_to_regions()
 }
 
 // callback func for elf_foreach()
-static void process_elf_shdr(size_t label, uintptr_t addr, size_t sz, unsigned access,
+static void process_elf_shdr(size_t label, addr_t addr, size_t sz, unsigned access,
                              const char* name, int is_progbits)
 {
 	const char* app = (const char*)label;
 
-	dprint("[ldr]    app=%s, addr=0x%08zx, sz=0x%08zx, acc=%u, progbits=%d, name=%s.\n",
+	dprint("[ldr]    app=%s, addr=0x%08lx, sz=0x%08zx, acc=%u, progbits=%d, name=%s.\n",
 		app, addr, sz, access, is_progbits, name);
 
 	enum
@@ -159,10 +160,10 @@ static void process_elf_shdr(size_t label, uintptr_t addr, size_t sz, unsigned a
 	if (is_progbits)
 	{
 		if (!is_pg_aligned(addr))
-			panic("ldr:  region '%s' for app=%s has addr=0x%x not aligned to page size.\n", name, app, addr);
+			panic("ldr:  region '%s' for app=%s has addr=0x%lx not aligned to page size.\n", name, app, addr);
 
 		if (!is_pg_aligned(sz) && strcmp(name, ".data"))
-			panic("ldr:  region '%s' for app=%s has size=0x%x not aligned to page size.\n", name, app, sz);
+			panic("ldr:  region '%s' for app=%s has size=0x%zx not aligned to page size.\n", name, app, sz);
 
 		if (access & Acc_x)
 		{
@@ -189,25 +190,25 @@ static void process_elf_shdr(size_t label, uintptr_t addr, size_t sz, unsigned a
 }
 
 // callback func for elf_foreach()
-static void process_elf_phdr(size_t label, uintptr_t vaddr, uintptr_t paddr, size_t sz,
-                             uintptr_t location, int is_load)
+static void process_elf_phdr(size_t label, addr_t vaddr, addr_t paddr, size_t sz,
+                             addr_t location, int is_load)
 {
 	const char* app = (const char*)label;
-	dprint("[ldr]    app=%s, va=0x%08zx, pa=0x%08zx, sz=0x%08zx, load=%d.\n", app, vaddr, paddr, sz, is_load);
+	dprint("[ldr]    app=%s, va=0x%08lx, pa=0x%08lx, sz=0x%08zx, load=%d.\n", app, vaddr, paddr, sz, is_load);
 	if (is_load)
 		regions.insert_sort(Region_t(paddr, sz, app));
 }
 
 // callback func for elf_foreach()
-static void load_elf_phdr(size_t label, uintptr_t vaddr, uintptr_t paddr, size_t sz,
-                          uintptr_t location, int is_load)
+static void load_elf_phdr(size_t label, addr_t vaddr, addr_t paddr, size_t sz,
+                          addr_t location, int is_load)
 {
-	dprint("[ldr]    load:  loc=0x%08zx, pa=0x%08zx, sz=0x%08zx, load=%d.\n", location, paddr, sz, is_load);
+	dprint("[ldr]    load:  loc=0x%08lx, pa=0x%08lx, sz=0x%08zx, load=%d.\n", location, paddr, sz, is_load);
 	if (is_load)
 		memcpy((void*)paddr, (void*)location, sz);
 }
 
-static void init_kip(uintptr_t sigma0_entry, uintptr_t roottask_entry)
+static void init_kip(addr_t sigma0_entry, addr_t roottask_entry)
 {
 	// search KIP at the start of kernel region by magic L4_kip_magic
 
@@ -220,7 +221,7 @@ static void init_kip(uintptr_t sigma0_entry, uintptr_t roottask_entry)
 	if (!kip)
 		panic("ldr:  Could not find KIP.\n");
 
-	printf("[ldr]  KIP found at 0x%zx.\n", (addr_t)kip);
+	printf("[ldr]  KIP found at 0x%p.\n", kip);
 
 	// set apps entry points
 	kip->sigma0_ip   = sigma0_entry;
@@ -288,7 +289,7 @@ extern "C" int main()
 	addr_t ramfs_addr;
 	size_t ramfs_sz;
 	get_ramfs(&ramfs_addr, &ramfs_sz);
-	printf("[ldr]  ramfs:  [0x%08zx - 0x%08zx)  %6u KB.\n", ramfs_addr, ramfs_addr + ramfs_sz, b2kb(ramfs_sz));
+	printf("[ldr]  ramfs:  [0x%08lx - 0x%08lx)  %6u KB.\n", ramfs_addr, ramfs_addr + ramfs_sz, b2kb(ramfs_sz));
 	sections.push_back(Section_t((addr_t)ramfs_addr, ramfs_sz, Mem_desc_t::Bldr_ramfs));
 
 	// search files - kernel, sigma0, roottask
@@ -310,11 +311,11 @@ extern "C" int main()
 		if (!strcmp(file->name, "roottask.elf"))
 			roottask_file = file;
 
-		printf("[ldr]  %2u  %-16s  0x%08zx  %8u  '%.8s ...'\n",
-			cnt, file->name, (uintptr_t)file->data, file->size, file->data);
+		printf("[ldr]  %2u  %-16s  0x%08lx  %8u  '%.8s ...'\n",
+			cnt, file->name, (addr_t)file->data, file->size, file->data);
 
-		assert((uintptr_t)file->data >= ramfs_addr  &&
-			((uintptr_t)file->data + file->size) < (ramfs_addr + ramfs_sz));
+		assert((addr_t)file->data >= ramfs_addr  &&
+			((addr_t)file->data + file->size) < (ramfs_addr + ramfs_sz));
 
 		cnt++;
 	} while ((file = ramfs_next(file)));
@@ -367,14 +368,14 @@ extern "C" int main()
 	dprint("[ldr]  memory regions:\n");
 	for (Regions_t::citer_t it=regions.cbegin(); it!=regions.cend(); ++it)
 	{
-		dprint("[ldr]    [%zx - %zx)  sz=0x%08zx,  %s.\n", it->start, it->start + it->sz, it->sz, it->owner);
+		dprint("[ldr]    [%lx - %lx)  sz=0x%08zx,  %s.\n", it->start, it->start + it->sz, it->sz, it->owner);
 	}
 
 	for (Regions_t::citer_t it=regions.cbegin(); (it+1)!=regions.cend(); ++it)
 	{
 		if (it->end() > (it+1)->start)
 		{
-			panic("ldr:  %s [%x-%x) overlaps with %s [%x - %x).\n",
+			panic("ldr:  %s [%lx-%lx) overlaps with %s [%lx - %lx).\n",
 				it->owner, it->start,  it->start + it->sz,
 				(it+1)->owner, (it+1)->start,  (it+1)->start + (it+1)->sz);
 		}
@@ -382,21 +383,21 @@ extern "C" int main()
 
 	// load ELFs to memory
 
-	uintptr_t kernel_entry = 0;
-	uintptr_t sigma0_entry = 0;
-	uintptr_t roottask_entry = 0;
+	addr_t kernel_entry = 0;
+	addr_t sigma0_entry = 0;
+	addr_t roottask_entry = 0;
 
 	rc = elf_foreach(kernel_file->data, kernel_file->size, 0, load_elf_phdr, 0, &kernel_entry, dprint_elf);
 	if (rc)
 		panic("[ldr]  elf_load(kernel.elf) - rc=%d.\n", rc);
 
-	rc = elf_foreach(sigma0_file->data, kernel_file->size, 0, load_elf_phdr, 0, &sigma0_entry, dprint_elf);
+	rc = elf_foreach(sigma0_file->data, sigma0_file->size, 0, load_elf_phdr, 0, &sigma0_entry, dprint_elf);
 	if (rc)
-		printf("[ldr]  elf_load(sigma0.elf) - rc=%d.\n", rc);
+		panic("[ldr]  elf_load(sigma0.elf) - rc=%d.\n", rc);
 
-	rc = elf_foreach(roottask_file->data, kernel_file->size, 0, load_elf_phdr, 0, &roottask_entry, dprint_elf);
+	rc = elf_foreach(roottask_file->data, roottask_file->size, 0, load_elf_phdr, 0, &roottask_entry, dprint_elf);
 	if (rc)
-		printf("[ldr]  elf_load(roottask.elf) - rc=%d.\n", rc);
+		panic("[ldr]  elf_load(roottask.elf) - rc=%d.\n", rc);
 
 	init_kip(sigma0_entry, roottask_entry);
 

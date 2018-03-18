@@ -38,13 +38,13 @@ SECTIONS
 
 		. = ALIGN(8);
 		_ctors_start = .;
-		KEEP(*(.ctors))       /* sparc FIXME */
-		KEEP(*(.init_array))  /* arm   FIXME */
+		KEEP(*(.ctors))       /* sparc, x86 */
+		KEEP(*(.init_array))  /* arm        */
 		_ctors_end = .;
 
 		_dtors_start = .;
-		KEEP(*(.dtors))       /* sparc FIXME */
-		KEEP(*(.fini_array))  /* arm   FIXME */
+		KEEP(*(.dtors))       /* sparc, x86 */
+		KEEP(*(.fini_array))  /* arm        */
 		_dtors_end = .;
 
 		_text_end = .;
@@ -65,24 +65,19 @@ SECTIONS
 		_data_start = .;
 		*(.data)
 		*(.data.*)
+		*(.got)               /* .got needs for libgcc */
+		_data_end = .;
+		. = ALIGN(page_sz);
+	} > vspace
 
+	.bss :
+	{
 		_bss_start = .;
 		*(.bss)
 		*(.bss.*)
+		*(.gnu.linkonce*)
 		_bss_end = .;
-
-		/* .got needs for libgcc */
-		_got_start = .;
-		*(.got)
-		_got_end = .;
-
-		_data_end = .;
-		/* does not aligne to allow use unused space by application */
-	} > vspace
-
-	/* FIXME:  topfw-based failed without .bss */
-	.bss :
-	{
+		. = ALIGN(page_sz);
 	} > vspace
 
 	/* not needed sections */
@@ -94,8 +89,7 @@ SECTIONS
 		*(.eh_frame)
 		*(.dummy)
 		*(.debug*)
-
-		*(.ARM.extab*)     /* FIXME arm */
-		*(.ARM.exidx*)     /* FIXME arm */
+		*(.ARM.extab*)     /* arm */
+		*(.ARM.exidx*)     /* arm */
 	}
 }

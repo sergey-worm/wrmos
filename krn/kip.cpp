@@ -1,10 +1,10 @@
 //##################################################################################################
 //
-//  kip.cpp - implement Kernel Interface Page area.
+//  Implementation Kernel Interface Page area.
 //
 //##################################################################################################
 
-#include "kip.h"
+#include "l4_kip.h"
 
 static L4_kip_t kip __attribute__((section(".kip"))) =
 {

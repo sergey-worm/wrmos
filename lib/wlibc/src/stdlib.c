@@ -8,8 +8,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
-#include "assert.h"
-#include "sys-utils.h"
+#include <assert.h>
+#include "sys_utils.h"
+#include "wlibc_cb.h"
 
 #if 0
  #include <ctype.h> // FIXME:  undefined reference to `__ctype_b'
@@ -31,30 +32,12 @@ int rand()
 	return 0;
 }
 
-// FIXME:  dangerous for multi-threading apps
 void* malloc(size_t sz)
 {
 	//printf("%s:  size=%u.\n", __func__, sz);
 
-	// TODO:  use memory_pool from wrmos library.
-
-	sz = round_up(sz, 8);
-
-	enum { Sz = 256*1024 };
-	static char pool[Sz] __attribute__((aligned(8)));
-	static size_t free_sz = Sz;
-	static size_t free_pos = 0;
-
-	assert(sz <= free_sz);
-
-	if (sz > free_sz)
-		return 0;
-
-	void* res = &pool[free_pos];
-	free_sz  -= sz;
-	free_pos += sz;
-
-	//printf("%s:  size=%u, ok, free=%u.\n", __func__, sz, free_sz);
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	void* res = cb->malloc ? cb->malloc(sz) : 0;
 	return res;
 }
 
@@ -70,9 +53,8 @@ void* calloc(size_t num, size_t size)
 	size_t sz = num * size;
 	void* res = malloc(sz);
 
-	// with memset() I see raise condition
-	//if (sz && res)
-	//	memset(res, 0, sz);
+	if (sz && res)
+		memset(res, 0, sz);
 
 	//printf("calloc:  sz=%u, ok.\n", sz);
 	return res;
@@ -118,7 +100,7 @@ unsigned long strtoul(const char* str, char** endptr, int base)
 	// convert from ASCII charecter to a digit
 	static char char2digit[] =
 	{
-		0,  1,  2,  3,  4,  5,  6,  7,  8,  9,               // '0'..'9'
+		0,  1,  2,  3,  4,  5,  6,  7,  8,  9,                // '0'..'9'
 		99, 99, 99, 99, 99, 99, 99,                           //
 		10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,   // 'A'..'Z'
 		23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,   //

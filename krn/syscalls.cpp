@@ -6,30 +6,34 @@
 
 #include "syscalls.h"
 #include "threads.h"
-#include "l4syscalls.h"
+#include "kuart.h"
+#include "l4_syscalls.h"
+
+void kdb_console_entry_wrapper(bool krn_mode, bool error_entry, const char* prompt);
 
 void syscall_exchange_registers(Thread_t& cur, Entry_frame_t& eframe)
 {
-	printk("exchange_registers entry:  id=0x%x/%u.\n", cur.globid().raw(), cur.globid().number());
+	printk("exchange_registers entry:  id=%u.\n", cur.globid().number());
 
 	L4_thrid_t dst     = eframe.scall_exreg_dest();
 	word_t     control = eframe.scall_exreg_control();
 	word_t     sp      = eframe.scall_exreg_sp();
 	word_t     ip      = eframe.scall_exreg_ip();
+	word_t     ip2     = eframe.scall_exreg_ip2();
 	L4_thrid_t pager   = eframe.scall_exreg_pager();
 	word_t     uhandle = eframe.scall_exreg_uhandle();;
 	word_t     flags   = eframe.scall_exreg_flags();
 
-	(void)sp; (void)ip; (void)uhandle;
+	(void)sp;
 
-	printk("exreg:  dst=0x%x/%u, ctl=%c%c%c%c%c%c%c%c%c%c, sp=0x%x, ip=0x%x, pgr=0x%x/%u, uhnd=0x%x, flags=0x%x.\n",
-		dst.raw(), dst.number(),
+	printk("exreg:  dst=%u, ctl=%c%c%c%c%c%c%c%c%c%c, sp=0x%lx, ip=0x%lx, pgr=%u, uhnd=0x%lx, flags=0x%lx.\n",
+		dst.number(),
 		control & L4_exreg_ctl_d ? 'd' : '-', control & L4_exreg_ctl_h ? 'h' : '-',
 		control & L4_exreg_ctl_p ? 'p' : '-', control & L4_exreg_ctl_u ? 'u' : '-',
 		control & L4_exreg_ctl_f ? 'f' : '-', control & L4_exreg_ctl_i ? 'i' : '-',
 		control & L4_exreg_ctl_s ? 's' : '-', control & L4_exreg_ctl_S ? 'S' : '-',
 		control & L4_exreg_ctl_R ? 'R' : '-', control & L4_exreg_ctl_H ? 'H' : '-',
-		sp, ip, pager.raw(), pager.number(), uhandle, flags);
+		sp, ip, pager.number(), uhandle, flags);
 
 	eframe.scall_exreg_result(L4_thrid_t::Nil);  // syscall failed
 
@@ -37,19 +41,87 @@ void syscall_exchange_registers(Thread_t& cur, Entry_frame_t& eframe)
 	Thread_t* dst_thr = Threads_t::find(dst);
 	if (!dst_thr  ||  dst_thr->task() != cur.task())
 	{
-		printk("exreg:  ERROR:  no thread with id=0x%x/%u.\n", dst.raw(), dst.number());
-		cur.utcb()->error(2);         // UnavailableThread
+		if (!dst_thr)
+			printk("exreg:  ERROR:  no thread with id=%u.\n", dst.number());
+		else
+			printk("exreg:  ERROR:  alien task:  dst=%u.\n", dst.number());
+		cur.uutcb()->error(2);         // UnavailableThread
 		return;
 	}
 
-	if (control == L4_exreg_ctl_f)
+	int etype = dst_thr->entry_type();
+
+	if (control & L4_exreg_ctl_d)
 	{
+		// deliver:  IP, SP, FLAGS, UserDefinedHandle, pager, control
+		eframe.scall_exreg_ip(dst_thr->entry_frame()->exit_pc(etype));
+		eframe.scall_exreg_ip2(dst_thr->entry_frame()->exit_pc2(etype));
+		// TODO:  deliver SP
 		eframe.scall_exreg_flags(dst_thr->flags());
+		eframe.scall_exreg_uhandle(dst_thr->uutcb()->user_defined_handle());
+		// TODO:  deliver pager  //eframe.scall_exreg_pager(dst_thr->pager());
+		// TODO:  deliver control
+
+		//force_printk/*_uart*/("*** get:  entry_type=%d, exit_pc=%lx/%lx.\n", etype,
+		// dst_thr->entry_frame()->exit_pc(etype), dst_thr->entry_frame()->exit_pc2(etype));
+	}
+
+	if (control & L4_exreg_ctl_h)
+	{
+		panic("exreg:  unimplemented control=0x%lx/h, implme!\n", control);
+	}
+
+	if (control & L4_exreg_ctl_p)
+	{
+		//panic("exreg:  unimplemented control=0x%x/h, implme!\n", control);
+		Thread_t* pgr_thr = Threads_t::find(pager);
+		if (!pgr_thr)
+		{
+			printk("exreg:  ERROR:  set pager:  no thread with id=%u .\n", pager.number());
+			cur.uutcb()->error(2);         // UnavailableThread
+			return;
+		}
+		dst_thr->pagerid(pager);
+		dst_thr->pager(pgr_thr);
+	}
+
+	if (control & L4_exreg_ctl_u)
+	{
+		dst_thr->uutcb()->user_defined_handle(uhandle);
+	}
+
+	if (control & L4_exreg_ctl_f)
+	{
 		dst_thr->flags(flags);
 	}
-	else
+
+	if (control & L4_exreg_ctl_i)
 	{
-		panic("exreg:  unimplemented control=0x%x, implme!\n", control);
+		dst_thr->entry_frame()->exit_pc(etype, ip, ip2);
+		//force_printk/*_uart*/("*** set:  entry_type=%d, exit_pc=%lx/%lx.\n", etype,
+		// dst_thr->entry_frame()->exit_pc(etype), dst_thr->entry_frame()->exit_pc2(etype));
+		assert(etype == Entry_type_syscall  ||  etype == Entry_type_pfault  ||
+		       etype == Entry_type_irq      ||  etype == Entry_type_exc);  // without Entry_type_kpfault
+	}
+
+	if (control & L4_exreg_ctl_s)
+	{
+		panic("exreg:  unimplemented control=0x%lx/s, implme!\n", control);
+	}
+
+	if (control & L4_exreg_ctl_S)
+	{
+		panic("exreg:  unimplemented control=0x%lx/S, implme!\n", control);
+	}
+
+	if (control & L4_exreg_ctl_R)
+	{
+		panic("exreg:  unimplemented control=0x%lx/R, implme!\n", control);
+	}
+
+	if (control & L4_exreg_ctl_H)
+	{
+		panic("exreg:  unimplemented control=0x%lx/H, implme!\n", control);
 	}
 
 	eframe.scall_exreg_result(dst.is_local() ? dst_thr->globid().raw() : dst_thr->localid().raw());  // syscall success
@@ -57,7 +129,7 @@ void syscall_exchange_registers(Thread_t& cur, Entry_frame_t& eframe)
 
 void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 {
-	printk("thread_control entry:  id=0x%x/%u.\n", cur.globid().raw(), cur.globid().number());
+	printk("thread_control entry:  id=%u.\n", cur.globid().number());
 
 	L4_thrid_t dst   = eframe.scall_thctl_dest();
 	L4_thrid_t space = eframe.scall_thctl_space();
@@ -65,9 +137,8 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	L4_thrid_t pager = eframe.scall_thctl_pager();
 	addr_t     utcb  = eframe.scall_thctl_utcb_location();
 
-	printk("tctl:  dst=0x%x/%u, space=0x%x/%u, sched=0x%x/%u, pager=0x%x/%u, utcb=0x%x.\n",
-		 dst.raw(), dst.number(), space.raw(), space.number(),
-		 sched.raw(), sched.number(),  pager.raw(), pager.number(), utcb);
+	printk("tctl:  dst=%u, space=%u, sched=%u, pager=%u, utcb=0x%lx.\n",
+		 dst.number(), space.number(), sched.number(),  pager.number(), utcb);
 
 	eframe.scall_thctl_result(0);   // syscall failed
 
@@ -76,7 +147,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	if (cur_id != thrid_sigma0()  &&  cur_id != thrid_roottask())
 	{
 		printk("tctl:  ERROR:  no privilege.\n");
-		cur.utcb()->error(1);  // NoPrivilege
+		cur.uutcb()->error(1);  // NoPrivilege
 		return;
 	}
 
@@ -95,8 +166,8 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	// check dst
 	if (!thrid_is_global_user(dst))
 	{
-		printk("tctl:  ERROR:  wrong dst=0x%x/%u.\n", dst.raw(), dst.number());
-		cur.utcb()->error(2);  // UnavailableThread
+		printk("tctl:  ERROR:  wrong dst=%u.\n", dst.number());
+		cur.uutcb()->error(2);  // UnavailableThread
 		return;
 	}
 
@@ -104,15 +175,15 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	if (0/*TODO*/)
 	{
 		printk("tctl:  ERROR:  invalid UTCB location.\n");
-		cur.utcb()->error(6);  // InvalidUtcb
+		cur.uutcb()->error(6);  // InvalidUtcb
 		return;
 	}
 
 	// find dst thread
 	Thread_t* dst_thr = Threads_t::find(dst.number()); // dst may exists or not
 
-	printk("tctl:  dst_thr=%x/%s, dst=0x%x/%u, space=0x%x.\n",
-		dst_thr, dst_thr ? dst_thr->name() : "---", dst.raw(), dst.number(), space.raw());
+	printk("tctl:  dst_thr=%p/%s, dst=%u, space=%u.\n",
+		dst_thr, dst_thr ? dst_thr->name() : "---", dst.number(), space.number());
 
 	// thread creation
 	if (!space.is_nil() && !dst_thr)
@@ -123,7 +194,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 		if (sched.is_nil())
 		{
 			printk("tctl:  ERROR:  schedeler thread ID should be passed for thread creation.\n");
-			cur.utcb()->error(4);  // InvalidSched
+			cur.uutcb()->error(4);  // InvalidSched
 			return;
 		}
 
@@ -131,7 +202,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 		if (dst == space  &&  !pager.is_nil())
 		{
 			printk("tctl:  ERROR:  pager should be Nil for aspace creation.\n");
-			cur.utcb()->error(3);  // InvalidSpace
+			cur.uutcb()->error(3);  // InvalidSpace
 			return;
 		}
 
@@ -163,12 +234,12 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 				else
 					force_printk("tctl:  ERROR:  task is not able to activate new thread, maxthr=%u.\n",
 						tsk->threads_max());
-				cur.utcb()->error(3);  // InvalidSpace
+				cur.uutcb()->error(3);  // InvalidSpace
 				return;
 			}
 		}
 
-		dst_thr = &Threads_t::create(dst, sched, pager, tsk, cur.prio(), name);
+		dst_thr = Threads_t::create(dst, sched, pager, tsk, cur.prio(), name);
 
 		// set utcb_location if need
 		if (utcb != -1)
@@ -185,7 +256,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	// thread modification - ver-bits of thrid, sched, pager, aspace
 	else if (!space.is_nil() && dst_thr)
 	{
-		printk("tctl:  Modification of existing thread 0x%x.\n", dst_thr);
+		printk("tctl:  Modification of existing thread 0x%p.\n", dst_thr);
 
 		// TODO:  abort any ongoing IPC operations
 
@@ -196,11 +267,11 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 			tsk = space_thr->task();
 
 		// check aspace - should be configured if thread will be activate
-		if (!pager.is_nil() && !dst_thr->is_active() &&  // thread will be activate
+		if (!pager.is_nil() && !dst_thr->is_active() &&   // thread will be activate
 			(!tsk || !tsk->is_configured()))              // task not exist or not configured
 		{
 			printk("tctl:  ERROR:  activation in not configured aspace.\n");
-			cur.utcb()->error(3);  // InvalidSpace
+			cur.uutcb()->error(3);  // InvalidSpace
 			return;
 		}
 
@@ -208,7 +279,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 		if (utcb != -1  &&  dst_thr->is_active())
 		{
 			printk("tctl:  ERROR:  setting utcb location for active thread.\n");
-			cur.utcb()->error(6);  // InvalidUtcb
+			cur.uutcb()->error(6);  // InvalidUtcb
 			return;
 		}
 
@@ -246,7 +317,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	else
 	{
 		printk("tctl:  ERROR:  destination thread is unavailable.\n");
-		cur.utcb()->error(2);  // UnavailableThread
+		cur.uutcb()->error(2);  // UnavailableThread
 		return;
 	}
 
@@ -257,37 +328,37 @@ void syscall_thread_switch(Thread_t& cur, Entry_frame_t& eframe)
 {
 	L4_thrid_t dst = eframe.scall_thsw_dest();
 
-	//printk("thread_switch entry:  id=0x%x/%u, dst=0x%x/%u.\n",
-	//	cur.globid().raw(), cur.globid().number(), dst.raw(), dst.number());
+	//printk("thread_switch entry:  id=%u, dst=%u.\n",
+	//	cur.globid().number(), dst.number());
 
 	// find dst thread
 	if (dst.is_nil())
 	{
 		// ordinary scheduling
 		Sched_t::switch_to_next();
-		cur.timeslice(0);
+		//cur.timeslice(0); ??? DELME
 	}
 	else
 	{
 		Thread_t* dst_thr = Threads_t::find(dst);
-	
 		if (!dst_thr)
 		{
 			// ordinary scheduling
 			Sched_t::switch_to_next();
-			cur.timeslice(0);
+			//cur.timeslice(0); ??? DELME
 		}
 		else
 		{
 			// extraordinary scheduling
 			panic("TODO:   donates remaining timeslice to dest.");
+			(void) cur;
 		}
 	}
 }
 
 void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe)
 {
-	printk("schedule entry:  id=0x%x/%u.\n", cur.globid().raw(), cur.globid().number());
+	printk("schedule entry:  id=%u.\n", cur.globid().number());
 
 	L4_thrid_t dst         = eframe.scall_sched_dest();
 	word_t     time_ctl    = eframe.scall_sched_time_ctl();
@@ -295,8 +366,8 @@ void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe)
 	word_t     prio        = eframe.scall_sched_prio();
 	word_t     preempt_ctl = eframe.scall_sched_preem_ctl();
 
-	printk("schd:  dst=0x%x/%u, tmctl=0x%x, procctl=0x%x, prio=%u, preemtctl=0x%x.\n",
-		 dst.raw(), dst.number(), time_ctl, proc_ctl, prio, preempt_ctl);
+	printk("schd:  dst=%u, tmctl=0x%lx, procctl=0x%lx, prio=%lu, preemtctl=0x%lx.\n",
+		dst.number(), time_ctl, proc_ctl, prio, preempt_ctl);
 
 	eframe.scall_sched_result(0);  // syscall failed
 
@@ -305,15 +376,15 @@ void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe)
 
 	if (!dst_thr)
 	{
-		printk("schd:  ERROR:  no thread with id=0x%x/%u.\n", dst.raw(), dst.number());
-		cur.utcb()->error(2);  // UnavailableThread
+		printk("schd:  ERROR:  no thread with id=%u.\n", dst.number());
+		cur.uutcb()->error(2);  // UnavailableThread
 		return;
 	}
 
 	if (dst_thr->schedid() != cur.globid())
 	{
 		printk("schd:  ERROR:  cur is not dest->sched.\n");
-		cur.utcb()->error(1);  // NoPrivilege
+		cur.uutcb()->error(1);  // NoPrivilege
 		return;
 	}
 
@@ -325,7 +396,7 @@ void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe)
 	    )
 	{
 		printk("schd:  ERROR:  invalid incoming parameter.\n");
-		cur.utcb()->error(5);  // InvalidParameter
+		cur.uutcb()->error(5);  // InvalidParameter
 		return;
 	}
 
@@ -365,18 +436,47 @@ void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe)
 	*/
 	switch (dst_thr->state())
 	{
-		case Thread_t::Idle:            panic("ImpMe"); eframe.scall_sched_result(2);  break;  //
-		case Thread_t::Inactive:        eframe.scall_sched_result(2);  break;  // inactive
-		case Thread_t::Active:          eframe.scall_sched_result(3);  break;  // running
-		case Thread_t::Ready:           eframe.scall_sched_result(3);  break;  // running
-		case Thread_t::Send_ipc:        eframe.scall_sched_result(4);  break;  // pending_send(4) / sending(5)
-		case Thread_t::Send_pfault:     eframe.scall_sched_result(4);  break;  // pending_send(4) / sending(5)
-		case Thread_t::Receive_ipc:     eframe.scall_sched_result(6);  break;  // waiting_receive(6) / receiving(7)
-		case Thread_t::Receive_pfault:  eframe.scall_sched_result(6);  break;  // waiting_receive(6) / receiving(7)
+		case Thread_t::Idle:              panic("ImpMe"); eframe.scall_sched_result(2);  break;  //
+		case Thread_t::Inactive:          eframe.scall_sched_result(2);  break;  // inactive
+		case Thread_t::Active:            eframe.scall_sched_result(3);  break;  // running
+		case Thread_t::Ready:             eframe.scall_sched_result(3);  break;  // running
+		case Thread_t::Send_ipc:          eframe.scall_sched_result(4);  break;  // pending_send(4) / sending(5)
+		case Thread_t::Send_pfault:       eframe.scall_sched_result(4);  break;  // pending_send(4) / sending(5)
+		case Thread_t::Send_exception:    eframe.scall_sched_result(4);  break;  // pending_send(4) / sending(5)
+		case Thread_t::Receive_ipc:       eframe.scall_sched_result(6);  break;  // waiting_receive(6) / receiving(7)
+		case Thread_t::Receive_pfault:    eframe.scall_sched_result(6);  break;  // waiting_receive(6) / receiving(7)
+		case Thread_t::Receive_exception: eframe.scall_sched_result(6);  break;  // waiting_receive(6) / receiving(7)
 	}
 
 	// return time control
 	eframe.scall_sched_time_ctl(-1);   // TODO:  set current time control
+}
+
+void syscall_unmap(Thread_t& cur, Entry_frame_t& eframe)
+{
+	printk("unmap entry:\n");
+
+	word_t control = eframe.scall_unmap_control();
+
+	unsigned fpages = (control & 0xff) + 1;  // 8 bits (it is wrm-extention, orig 6 bits)
+	L4_utcb_t* utcb = cur.uutcb();
+
+	for (unsigned i=0; i<fpages; ++i)
+	{
+		L4_fpage_t fpage = L4_fpage_t::create(utcb->mr[i]);
+		if (fpage.is_complete())
+		{
+			// wrm extention
+			printk("unmap:  complete aspace.\n");
+			cur.task()->unmap(0x0, 0xf0000000);
+			Threads_t::remap_user_utcb(cur.task());
+		}
+		else if (!fpage.is_nil())
+		{
+			printk("unmap:  va=0x%lx, sz=0x%lx.\n", fpage.addr(), fpage.size());
+			cur.task()->unmap(fpage.addr(), fpage.size());
+		}
+	}
 }
 
 void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
@@ -397,7 +497,7 @@ void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
 	L4_thrid_t cur_id = cur.globid();
 	if (cur_id != thrid_sigma0()  &&  cur_id != thrid_roottask())
 	{
-		cur.utcb()->error(1);  // NoPrivilege
+		cur.uutcb()->error(1);  // NoPrivilege
 		return;
 	}
 
@@ -410,7 +510,7 @@ void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
 
 	if (!thr || !thr->task())
 	{
-		cur.utcb()->error(3);  // InvalidSpace
+		cur.uutcb()->error(3);  // InvalidSpace
 		return;
 	}
 
@@ -422,20 +522,23 @@ void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
 		if (!is_aligned(utcb_area.addr(), Cfg_page_sz)  ||  !is_aligned(utcb_area.size(), Cfg_page_sz)  ||
 			utcb_area.access() != Acc_rw)
 		{
-			printk("ERROR:  sctl:  unavailable UTCB area:  addr=0x%x, sz=0x%x.\n", utcb_area.addr(), utcb_area.size());
-			cur.utcb()->error(6);  // Invalid UTCB area
+			printk("ERROR:  sctl:  unavailable UTCB area:  addr=0x%lx, sz=0x%lx.\n", utcb_area.addr(), utcb_area.size());
+			cur.uutcb()->error(6);  // Invalid UTCB area
 			return;
 		}
 
 		if (!is_aligned(kip_area.addr(), Cfg_page_sz)  ||  kip_area.size() != Cfg_page_sz  ||
 			kip_area.access() != Acc_rx     ||  kip_area.is_cross(utcb_area))
 		{
-			printk("ERROR:  sctl:  unavailable KIP area:  addr=0x%x, sz=0x%x.\n", kip_area.addr(), kip_area.size());
-			cur.utcb()->error(7);  // Invalid KIP area
+			printk("ERROR:  sctl:  unavailable KIP area:  addr=0x%lx, sz=0x%lx.\n", kip_area.addr(), kip_area.size());
+			cur.uutcb()->error(7);  // Invalid KIP area
 			return;
 		}
 
 		// TODO:  check that kip_area and utcb_area should be in user-accessible part of an address space
+
+		printk("sctl:  kip_area:  va=0x%lx, sz=0x%lx,  utcbs_area:  va=0x%lx, sz=0x%lx.\n",
+			kip_area.addr(), kip_area.size(), utcb_area.addr(), utcb_area.size());
 
 		tsk->kip_area(kip_area);
 		tsk->utcb_area(utcb_area);
@@ -467,7 +570,7 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 	L4_thrid_t cur_id = cur.globid();
 	if (cur_id != thrid_sigma0()  &&  cur_id != thrid_roottask())
 	{
-		cur.utcb()->error(1);  // NoPrivilege
+		cur.uutcb()->error(1);  // NoPrivilege
 		return;
 	}
 
@@ -479,23 +582,23 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 		if (num > Fpages_max)
 			force_printk("ERROR:  mctl:  too many fpages, num=%u, max=%u.\n", num, Fpages_max);
 		else
-			force_printk("ERROR:  mctl:  unvalid attribs: 0x%x, 0x%x, 0x%x, 0x%x.\n", attr[0], attr[1], attr[2], attr[3]);
-		cur.utcb()->error(5);  // InvalidParameter
+			force_printk("ERROR:  mctl:  unvalid attribs:  0x%lx 0x%lx 0x%lx 0x%lx.\n", attr[0], attr[1], attr[2], attr[3]);
+		cur.uutcb()->error(5);  // InvalidParameter
 		return;
 	}
 
 	// set attribs
 	for (unsigned i=0; i<num; ++i)
 	{
-		int attr_index = cur.utcb()->mr[i] & 0x3;
+		int attr_index = cur.uutcb()->mr[i] & 0x3;
 		int cached = attr[attr_index] == 1  ?  NotCachable  :  Cachable;
-		L4_fpage_t fp = L4_fpage_t::create(cur.utcb()->mr[i]);
+		L4_fpage_t fp = L4_fpage_t::create(cur.uutcb()->mr[i]);
 
 		int cur_attr = cur.task()->attributes(fp);
 		if (cur_attr < 0)
 		{
-			printk("ERROR:  mctl:  alien fpage:  addr=0x%x, sz=0x%x.\n", fp.addr(), fp.size());
-			cur.utcb()->error(5);  // InvalidParameter
+			printk("ERROR:  mctl:  alien fpage:  addr=0x%lx, sz=0x%lx.\n", fp.addr(), fp.size());
+			cur.uutcb()->error(5);  // InvalidParameter
 			return;
 		}
 
@@ -507,7 +610,6 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 	eframe.scall_mctl_result(1); // syscall success
 }
 
-void kdb_console_entry_wrapper(bool krn_mode, bool error_entry, const char* prompt);
 void syscall_kdb(Thread_t& cur, Entry_frame_t& eframe)
 {
 	word_t opcode = eframe.scall_kdb_opcode();
@@ -517,15 +619,23 @@ void syscall_kdb(Thread_t& cur, Entry_frame_t& eframe)
 
 	(void)cur;
 
-	printk("kdb entry:  opcode=%ld, param=%ld, data=0x%lx, sz=%lu.\n", opcode, param, data, size);
+	printk("kdb entry:  opcode=%ld, param=%ld, data=0x%p, sz=%zu.\n", opcode, param, data, size);
 
 	eframe.scall_kdb_result(0);  // return code
 
 	switch (opcode)
 	{
+		case L4_kdb_print:
+		{
+			Uart::putsn((char*)data, size);  // write to uart
+			printf("%.*s", size, data);      // write to log or console
+			break;
+		}
 		case L4_kdb_console:
 		{
+			SystemClock_t::inside_kdb(1);
 			kdb_console_entry_wrapper(false,  param, (const char*)data);
+			SystemClock_t::inside_kdb(0);
 			break;
 		}
 		case L4_kdb_threads:

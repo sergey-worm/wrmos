@@ -104,13 +104,16 @@ SECTIONS
 		_data_start = .;
 		*(.data)
 		*(.data.*)
+		_data_end = .;
+		. = ALIGN(page_sz);
+	} > vspace
 
+	.bss :  AT( ADDR(.bss) - _diff_va_pa )
+	{
 		_bss_start = .;
 		*(.bss)
 		*(.bss.*)
 		_bss_end = .;
-
-		_data_end = .;
 		. = ALIGN(page_sz);
 	} > vspace
 
@@ -119,6 +122,7 @@ SECTIONS
 	/DISCARD/ :
 	{
 		*(.dtors)
+		*(.fini_array)
 		*(.note)
 		*(.note.ABI-tag)
 		*(.comment)
@@ -126,6 +130,5 @@ SECTIONS
 		*(.dummy)
 		*(.debug*)
 		*(.ARM.exidx*) /* for arm unwinding */
-		*(.fini_array)
 	}
 }

@@ -8,7 +8,7 @@
 #define KTIMER_H
 
 #include "timer.h"
-#include "assert.h"
+#include "wlibc_assert.h"
 
 class Timer
 {
@@ -34,44 +34,50 @@ public:
 
 	static void dump(Print_t dprint)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		timer_dump(_addr, dprint);
 	}
 
 	static inline int set(unsigned period_usec)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		_period_usec = period_usec;
 		return timer_set(_addr, _sysclock_hz, period_usec);
 	}
 
 	static inline void start()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		timer_start(_addr);
 	}
 
 	static inline void stop()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		timer_stop(_addr);
 	}
 
 	static inline uint64_t value_usec()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return timer_value_usec(_addr, _sysclock_hz, _period_usec);
+	}
+
+	static inline unsigned raw_value()
+	{
+		wassert(_addr != -1);
+		return timer_raw_value(_addr);
 	}
 
 	static inline uint64_t usec_from_raw_value(unsigned val)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return timer_usec_from_raw_value(_addr, _sysclock_hz, _period_usec, val);
 	}
 
 	static inline void irq_ack()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return timer_irq_ack(_addr);
 	}
 };

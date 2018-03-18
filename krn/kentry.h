@@ -4,7 +4,7 @@
 //
 //##################################################################################################
 
-#include "types.h"
+#include "sys_types.h"
 
 void kentry_irq(unsigned irq);
 void kentry_syscall();

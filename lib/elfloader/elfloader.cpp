@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include "elfloader.h"
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dprint) dprint(__VA_ARGS__)
 #else
 #  define print(...) (void)dprint
@@ -157,7 +157,7 @@ enum
 	Pflags_r             = 0x4,
 };
 
-#if Cfg_debug
+#ifdef DEBUG
 
 static const char* format_str(int format)
 {
@@ -267,7 +267,7 @@ static const char* pflags_str(int pflags)
 	return "__unknown_pflags_type__";
 }
 
-#endif // Cfg_debug
+#endif  // DEBUG
 
 static unsigned sflags2acc(unsigned flags)
 {
@@ -486,7 +486,9 @@ extern "C" int elf_check(const void* elf, unsigned sz, Elf_dprint_t dprint)
 		unsigned shend = ehdr32.shoff + ehdr32.shnum * ehdr32.shentsize;
 		if (sz < shend)
 		{
-			print("ERROR:  ELF is size too small (%u), expect >= %u.\n", sz, shend);
+			print("ERROR:  ELF size too small (%u), expect >= %u.\n", sz, shend);
+			print("        ehdr32.shoff=%u,  ehdr32.shnum=%u, ehdr32.shentsize=%u.\n",
+				ehdr32.shoff, ehdr32.shnum, ehdr32.shentsize);
 			return 7;
 		}
 
@@ -536,7 +538,7 @@ extern "C" int elf_check(const void* elf, unsigned sz, Elf_dprint_t dprint)
 		unsigned shend = ehdr64.shoff + ehdr64.shnum * ehdr64.shentsize;
 		if (sz < shend)
 		{
-			print("ERROR:  ELF is size too small (%u), expect >= %u.\n", sz, shend);
+			print("ERROR:  ELF size too small (%u), expect >= %u.\n", sz, shend);
 			return 13;
 		}
 
@@ -576,7 +578,7 @@ extern "C" int elf_entry(const void* elf, unsigned sz, unsigned* entry_point, El
 	if (rc)
 	{
 		print("ERROR:  elf is not valid, rc=%d.\n", rc);
-		return 1;
+		return 100 + rc;
 	}
 
 	Elf_ident_t* ident = (Elf_ident_t*) elf;
@@ -613,7 +615,7 @@ extern "C" int elf_dump(const void* elf, unsigned sz, Elf_dprint_t dprint)
 	if (rc)
 	{
 		print("ERROR:  elf is not valid, rc=%d.\n", rc);
-		return 1;
+		return 100 + rc;
 	}
 
 	// dump ident
@@ -725,53 +727,53 @@ extern "C" int elf_dump(const void* elf, unsigned sz, Elf_dprint_t dprint)
 
 template <typename HDR_t, typename SHDR_t, typename PHDR_t>
 static void foreach(const void* elf, Elf_shdr_func_t sh_func, Elf_phdr_func_t ph_func, size_t label,
-                    uintptr_t* entry, int endian, Elf_dprint_t dprint)
+                    addr_t* entry, int endian, Elf_dprint_t dprint)
 {
-		// convert to host endianness
-		HDR_t* eh32 = (HDR_t*) elf;
-		HDR_t ehdr32;
-		to_host_hdr(eh32, &ehdr32, endian);
+	// convert to host endianness
+	HDR_t* eh32 = (HDR_t*) elf;
+	HDR_t ehdr32;
+	to_host_hdr(eh32, &ehdr32, endian);
 
-		if (entry)
-			*entry = ehdr32.entry;
+	if (entry)
+		*entry = ehdr32.entry;
 
-		// iterate sections headers
-		if (sh_func)
+	// iterate sections headers
+	if (sh_func)
+	{
+		SHDR_t* sh_str = (SHDR_t*)((size_t)elf + ehdr32.shoff + ehdr32.shstrndx * ehdr32.shentsize);
+		const char* str_tb = (char*)((size_t)elf + to_host(sh_str->offset, endian));
+
+		for (unsigned i=0; i<ehdr32.shnum; ++i)
 		{
-			SHDR_t* sh_str = (SHDR_t*)((size_t)elf + ehdr32.shoff + ehdr32.shstrndx * ehdr32.shentsize);
-			const char* str_tb = (char*)((size_t)elf + to_host(sh_str->offset, endian));
+			SHDR_t* sh = (SHDR_t*)((size_t)elf + ehdr32.shoff + i * ehdr32.shentsize);
+			SHDR_t shdr;
+			to_host_shdr(sh, &shdr, endian);
 
-			for (unsigned i=0; i<ehdr32.shnum; ++i)
-			{
-				SHDR_t* sh = (SHDR_t*)((size_t)elf + ehdr32.shoff + i * ehdr32.shentsize);
-				SHDR_t shdr;
-				to_host_shdr(sh, &shdr, endian);
+			unsigned acc = sflags2acc(shdr.flags);
 
-				unsigned acc = sflags2acc(shdr.flags);
-
-				sh_func(label, shdr.addr, shdr.size, acc, str_tb + shdr.name, shdr.type == Stype_progbits);
-			}
+			sh_func(label, shdr.addr, shdr.size, acc, str_tb + shdr.name,
+			        shdr.type == Stype_progbits   ||  shdr.type == Stype_nobits);
 		}
+	}
 
-		// iterate program headers
-		if (ph_func)
+	// iterate program headers
+	if (ph_func)
+	{
+		for (unsigned i=0; i<ehdr32.phnum; ++i)
 		{
-			for (unsigned i=0; i<ehdr32.phnum; ++i)
-			{
-				PHDR_t* ph = (PHDR_t*)((size_t)elf + ehdr32.phoff + i * ehdr32.phentsize);
-				PHDR_t phdr;
-				to_host_phdr(ph, &phdr, endian);
+			PHDR_t* ph = (PHDR_t*)((size_t)elf + ehdr32.phoff + i * ehdr32.phentsize);
+			PHDR_t phdr;
+			to_host_phdr(ph, &phdr, endian);
 
-				uintptr_t location = (size_t)elf + phdr.offset;
+			addr_t location = (size_t)elf + phdr.offset;
 
-				ph_func(label, phdr.vaddr, phdr.paddr, phdr.memsz, location, phdr.type == Ptype_load);
-			}
+			ph_func(label, phdr.vaddr, phdr.paddr, phdr.memsz, location, phdr.type == Ptype_load);
 		}
-
+	}
 }
 
 extern "C" int elf_foreach(const void* elf, size_t sz, Elf_shdr_func_t sh_func,
-                Elf_phdr_func_t ph_func, size_t label, uintptr_t* entry, Elf_dprint_t dprint)
+                Elf_phdr_func_t ph_func, size_t label, addr_t* entry, Elf_dprint_t dprint)
 {
 	print("foreach:  elf=0x%x, sz=0x%x.\n", elf, sz);
 
@@ -782,7 +784,7 @@ extern "C" int elf_foreach(const void* elf, size_t sz, Elf_shdr_func_t sh_func,
 	if (rc)
 	{
 		print("foreach:  ERROR:  elf is not valid, rc=%d.\n", rc);
-		return 1;
+		return 100 + rc;
 	}
 
 	// get ident

@@ -78,18 +78,16 @@ SECTIONS
 	{
 		_data_start = .;
 		*(.data)
+		*(.got)             /* .got need fo libgcc */
+		_data_end = .;
+	} > load
 
+	.bss : AT( ADDR(.bss) - diff_load_boot)
+	{
 		_bss_start = .;
 		*(.bss)
 		*(.bss.*)
 		_bss_end = .;
-
-		/* .got need fo libgcc */
-		_got_start = .;
-		*(.got)
-		_got_end = .;
-
-		_data_end = .;
 	} > load
 
 	. = ALIGN(Cfg_page_sz);

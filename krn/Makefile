@@ -18,13 +18,13 @@ use_baseflags  += -fno-exceptions
 use_baseflags  += -O2
 
 use_warns  := -Wall -Wextra -Wshadow -Wcast-align -Wwrite-strings
-use_warns  += -Wredundant-decls
+#use_warns  += -Wredundant-decls
 use_warns  += -Wno-attributes -Wno-deprecated-declarations
 use_warns  += -Wno-div-by-zero -Wno-endif-labels -Wfloat-equal
 use_warns  += -Wformat=2 -Wno-format-extra-args -Winit-self
 use_warns  += -Winvalid-pch -Wmissing-format-attribute
 use_warns  += -Wmissing-include-dirs -Wno-multichar
-use_warns  += -Wredundant-decls -Wshadow
+use_warns  += -Wshadow
 use_warns  += -Wno-sign-compare -Wswitch -Wsystem-headers -Wundef
 use_warns  += -Wno-pragmas -Wno-unused-but-set-parameter
 use_warns  += -Wno-unused-but-set-variable -Wno-unused-result
@@ -32,12 +32,11 @@ use_warns  += -Wwrite-strings -Wdisabled-optimization -Wpointer-arith
 use_warns  += -Werror
 
 ifeq ($(arch),x86_64)
-  use_baseflags  += -mcmodel=kernel  # FIXME:  it need for 64-bit kernel
+  use_baseflags  += -mcmodel=kernel  # for link 64-bit kernel
 endif
 
 ifeq ($(dbg),1)
   use_baseflags += -g           # add GDB info
-  use_baseflags += -DCfg_debug  # define dbg macro
   use_baseflags += -DDEBUG
 else
   use_baseflags += -DNDEBUG
@@ -79,7 +78,7 @@ incflags   += -I$(arch)
 incflags   += -I../lib/sys/$(arch)
 incflags   += -I../lib/sys
 incflags   += -I../lib/list
-incflags   += -I../lib/l4
+incflags   += -I../lib/l4/inc
 incflags   += -I../lib/wlibc/inc
 incflags   += -I../lib/shell
 incflags   += -I../lib/cbuf

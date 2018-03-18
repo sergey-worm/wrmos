@@ -1,0 +1,35 @@
+####################################################################################################
+#
+#  vi: set ft=make:
+#
+#  Specific project params.
+#
+####################################################################################################
+
+# platform parameters
+include cfg/plt/sparc-qemu-leon3.plt
+
+# toolchain
+gccprefix = sparc-linux-
+
+# debug flags
+usr_lib_dbg      = 1
+usr_krn_dbg      = 1
+usr_krn_log      = 1
+usr_app_dbg      = 1
+usr_ldr_dbg      = 1
+
+# libs to build
+usr_lib_paths    = lib/console
+
+# apps to build
+usr_app_paths    = app/uart app/console app/chello
+
+# files to put in the ramfs
+usr_ramfs        = config.alph:../cfg/alph/console.alph
+usr_ramfs       += uart.elf:$(blddir)/app/uart/uart.elf:$(page_sz)
+usr_ramfs       += console.elf:$(blddir)/app/console/console.elf:$(page_sz)
+usr_ramfs       += chello.elf:$(blddir)/app/chello/chello.elf:$(page_sz)
+
+# base file to set all project params
+include cfg/base.cfg

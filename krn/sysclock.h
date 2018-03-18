@@ -7,29 +7,56 @@
 #ifndef SYS_CLOCK_T
 #define SYS_CLOCK_T
 
-#include "l4types.h"
+#include "l4_types.h"
 #include "krn-config.h"
 #include "ktimer.h"
 #include "kintc.h"
+#include "kkip.h"
+#include "wlibc_panic.h"
+#include <stdio.h>
+
+/**/#define DBG
 
 class SystemClock_t
 {
 	static L4_clock_t _sys_clock;       // updated every system's timer tick
+	static L4_kip_t*  _kip;             // kip pointer
+	static int        _inside_kdb;      // inside kdb flag, don't read timer value if 1, use prev value
 
 public:
 
-	static void init() {}
+	static void init()
+	{
+		_kip = get_kip();
+	}
 
-	static inline void tick() { _sys_clock += Cfg_krn_tick_usec; /*printf("new tick=%llu.\n", _sys_clock);~*/ }
+	static inline void tick()
+	{
+		_sys_clock += Cfg_krn_tick_usec;
+		//printf("new tick=%llu.\n", _sys_clock);
+	}
+
+	static void inside_kdb(int v)
+	{
+		_inside_kdb = v;
+	}
 
 	// NOTE:  inside irq handler pending bit is 0, to allow use sys_clock() inside
 	//        timer irq handler befor tick() need to use is_tick_irq_pending = 1
 	static L4_clock_t sys_clock(const char* place = 0, int is_tick_irq_pending = 0)
 	{
+		#ifdef DBG
 		int pnd[3];       // for debug
 		uint64_t val[3];  // for debug
 		pnd[0] = pnd[1] = pnd[2] = 0;
 		val[0] = val[1] = val[2] = 0;
+		#endif
+
+		static L4_clock_t prev = 0;
+
+		if (_inside_kdb)
+			return prev;
+
 		uint64_t res = 0;
 		if (Timer::inited() && Intc::inited())
 		{
@@ -40,8 +67,10 @@ public:
 			}
 			else
 			{
+				#ifdef DBG
 				pnd[0] = Intc::is_pending(Cfg_krn_timer_irq);
 				val[0] = Timer::value_usec();
+				#endif
 				if (Intc::is_pending(Cfg_krn_timer_irq))
 				{
 					res = _sys_clock + Cfg_krn_tick_usec + Timer::value_usec();
@@ -49,37 +78,57 @@ public:
 				else
 				{
 					res = _sys_clock + Timer::value_usec();
+					#ifdef DBG
 					pnd[1] = Intc::is_pending(Cfg_krn_timer_irq);
 					val[1] = Timer::value_usec();
+					#endif
 					if (Intc::is_pending(Cfg_krn_timer_irq))
 						res = _sys_clock + Cfg_krn_tick_usec + Timer::value_usec();
 				}
 			}
-			static L4_clock_t prev = 0;
 
 			//printf("irq_pending:   %d %d %d:  %d:  %s\n", pnd[0], pnd[1], pnd[2],
 			//	Intc::is_pending(Cfg_krn_timer_irq), place?place:"---");
+			(void)place;
+
+		#ifdef DEBUG
 
 			#if defined(Cfg_arch_x86) or defined(Cfg_arch_x86_64)
-			// WA:  for x86-qemu PIC may receive IRQ from PIT with lag ~100 usec
-			if (res < prev  &&  Timer::value_usec() < 100)
+			// WA:  for x86-qemu PIC may receive IRQ from PIT with lag ~200 usec or more
+			if (res < prev  &&  Timer::value_usec() < 1000)
 				res = _sys_clock + Cfg_krn_tick_usec + Timer::value_usec();
 			#endif
 
-			if (0   &&   res < prev)
+			if (res < prev)
 			{
+				#ifdef DBG
 				pnd[2] = Intc::is_pending(Cfg_krn_timer_irq);
 				val[2] = Timer::value_usec();
+				#endif
 				printf("ERROR:  SystemClock failed, too long in kernel mode (%s):\n", place ? place : "---");
 				printf("ERROR:  prev:            %llu\n", prev);
-				printf("ERROR:  res:             %llu\n", res);
+				printf("ERROR:  now:             %llu\n", res);
 				printf("ERROR:  sys_clock_base:  %llu\n", _sys_clock);
+				#ifdef DBG
 				printf("ERROR:  tmr_value_usec:  %llu %llu %llu\n", val[0], val[1], val[2]);
 				printf("ERROR:  irq_pending:     %d %d %d\n", pnd[0], pnd[1], pnd[2]);
-				assert(0 && "too long in kernel mode");
+				#endif
+
+				panic("too long in kernel mode");
 			}
+
+		#endif // DEBUG
+
 			prev = res;
 		}
+
+		// update kip.uptime
+		if (_kip)
+			l4_kip_set_uptime_usec(_kip, _sys_clock);
+
+		//printf("%s:  base=%llu, return %llu, pend=%d.\n", __func__,
+		//	_sys_clock, res, Intc::inited() ? Intc::is_pending(Cfg_krn_timer_irq) : -1);
+
 		return res;
 	}
 };

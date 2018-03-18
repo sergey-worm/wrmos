@@ -5,8 +5,8 @@
 //##################################################################################################
 
 #include <unistd.h>
-#include "l4api.h"
-#include "l4ipcerr.h"
+#include "l4_api.h"
+#include "l4_ipcerr.h"
 
 extern "C" unsigned sleep(unsigned sec)
 {
@@ -21,5 +21,5 @@ extern "C" int usleep(useconds_t usec)
 	L4_utcb_t* utcb = l4_utcb();
 	utcb->msgtag(L4_msgtag_t());
 	int rc = l4_send(utcb->global_id(), L4_time_t::create_rel(usec));
-	return rc == Ipc_timeout  ?  0  :  -1;
+	return rc == L4_ipc_timeout  ?  0  :  -1;
 }

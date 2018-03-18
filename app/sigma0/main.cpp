@@ -4,15 +4,16 @@
 //
 //##################################################################################################
 
-#include "l4api.h"
+#include "l4_api.h"
 #include "wrmos.h"
 #include "list.h"
-#include "panic.h"
-#include "sys-utils.h"
-#include "libc_io.h"
+#include "sys_utils.h"
+#include "wlibc_cb.h"
+#include "wlibc_panic.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <assert.h>
 
 extern "C" { void test_snprintf(); }
 
@@ -59,10 +60,9 @@ static size_t conv_mem_size = 0;
 
 static void init_io()
 {
-	Libc_io_callbacks_t io;
-	io.out_char    = NULL;
-	io.out_string  = l4_out_string;
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = NULL;
+	cb->out_string = l4_kdb_putsn;
 }
 
 int main()
@@ -123,7 +123,7 @@ int main()
 		}
 	}
 
-	wrm_logi("free memory = %#x.\n", conv_mem_size);
+	wrm_logi("free memory = %#zx.\n", conv_mem_size);
 
 	// create Roottask thread/aspace via ThreadControl
 
@@ -164,14 +164,16 @@ int main()
 
 	// start app by sending Thread_start msg
 
+	L4_msgtag_t tag;
+	tag.ipc_label(L4_msgtag_t::Thread_start);
+	tag.propagated(false);
+	tag.untyped(3);
+	tag.typed(0);
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(L4_msgtag_t::Thread_start);
-	utcb->msgtag().untyped(3);
-	utcb->msgtag().typed(0);
+	utcb->mr[0] = tag.raw();;
 	utcb->mr[1] = kip->roottask_ip;
 	utcb->mr[2] = kip->roottask_sp;
 	utcb->mr[3] = *(word_t*)"alph";
-
 	res = l4_send(rtsk, L4_time_t::Never);
 	//wrm_logi("l4_send(start_msg) - res=%u.\n", res);
 	if (res)
@@ -184,10 +186,10 @@ int main()
 		// wait pfaults from root, memory requests from kernel/users
 		L4_thrid_t from;
 		//wrm_logi("wait ipc.\n");
-		res = l4_receive(rtsk, L4_time_t::Never, from);
+		res = l4_receive(rtsk, L4_time_t::Never, &from);
 
 		// copy msg to use printf below
-		L4_msgtag_t tag = utcb->msgtag();
+		tag = utcb->msgtag();
 		word_t mr[64];
 		memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
@@ -198,9 +200,8 @@ int main()
 		word_t addr = mr[1];
 		word_t inst = mr[2];
 
-		//wrm_logi("received IPC:  from=0x%lx, num=%u.\n", from.raw(), from.number());
-		//wrm_logi("         msg:  tag=0x%lx, lable=%ld/%ld, u=%u, t=%u.\n",
-		//	tag.raw(), tag.ipc_label(), tag.proto_label(), tag.untyped(), tag.typed());
+		//wrm_logd("%s:  rx:  tag=0x%lx:  lable=%d/%d, u=%u, t=%u, mr[1]=%lx, mr[2]=%lx.\n", __func__,
+		//	tag.raw(), tag.proto_label(), tag.ipc_label(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 
 		// pagefault proto
 		if (from == rtsk  &&  tag.proto_label() == L4_msgtag_t::Pagefault)
@@ -224,22 +225,22 @@ int main()
 
 			if (!found)
 			{
-				wrm_loge("rtsk pfault for unexpected addr=0x%x or acc=%s, inst=0x%x.\n",
+				wrm_loge("rtsk pfault for unexpected addr=0x%lx or acc=%s, inst=0x%lx.\n",
 					addr, acc2str(acc), inst);
 				l4_kdb("Rtsk pfault for unexpected addr or acc");
 			}
 
 			// grant/map
 
-			utcb->msgtag().ipc_label(0);
-			utcb->msgtag().untyped(0);
-			utcb->msgtag().typed(2);
-
-			L4_map_item_t* item = (L4_map_item_t*) &utcb->mr[1];
-			item->set(fault);
-
+			tag.ipc_label(0);
+			tag.propagated(false);
+			tag.untyped(0);
+			tag.typed(2);
+			L4_map_item_t item = L4_map_item_t::create(fault);
+			utcb->mr[0] = tag.raw();
+			utcb->mr[1] = item.word0();
+			utcb->mr[2] = item.word1();
 			res = l4_send(from, L4_time_t::Never);
-
 			if (res)
 			{
 				wrm_loge("l4_send(map) failed, res=%u.\n", res);
@@ -321,15 +322,15 @@ int main()
 
 			// map
 
-			utcb->msgtag().ipc_label(0);
-			utcb->msgtag().untyped(0);
-			utcb->msgtag().typed(2);
-
-			L4_map_item_t* mitem = (L4_map_item_t*) &utcb->mr[1];
-			mitem->set(map_fpage);
-
+			tag.ipc_label(0);
+			tag.propagated(false);
+			tag.untyped(0);
+			tag.typed(2);
+			L4_map_item_t mitem = L4_map_item_t::create(map_fpage);
+			utcb->mr[0] = tag.raw();
+			utcb->mr[1] = mitem.word0();
+			utcb->mr[2] = mitem.word1();
 			res = l4_send(from, L4_time_t::Never);
-
 			if (res)
 			{
 				wrm_logi("l4_send(map) failed, res=%u.\n", res);
@@ -338,6 +339,8 @@ int main()
 		}
 		else
 		{
+			wrm_loge("%s:  rx:  tag=0x%lx:  lable=%ld/%ld, u=%u, t=%u, mr[1]=%lx, mr[2]=%lx.\n", __func__,
+				tag.raw(), tag.proto_label(), tag.ipc_label(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 			l4_kdb("Sigma0 received unexpected msg");
 		}
 	}

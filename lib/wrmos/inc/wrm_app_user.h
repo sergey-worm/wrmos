@@ -7,7 +7,7 @@
 #ifndef WRM_APP_USER_H
 #define WRM_APP_USER_H
 
-#include "l4types.h"
+#include "l4_types.h"
 
 #ifdef __cplusplus
 extern "C" {

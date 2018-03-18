@@ -5,7 +5,7 @@
 //##################################################################################################
 
 #include "wrm_log.h"
-#include "l4api.h"
+#include "l4_api.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -29,9 +29,9 @@ extern "C" void wrm_vlog(Wrm_loglevel_t level, const char* fmt, va_list args)
 	memcpy(name_str, &name, 4);
 	name_str[4] = '\0';
 	char str[256];
-	int sz = snprintf(str, sizeof(str), "[%4s:%4llu.%03u]  %s", name_str,
-		(long long int)clock/1000, // this cast need cause clock (uint64_t) may be 'long' or 'long long'
-		(int)clock%1000, loglevel2str(level));
+	int sz = snprintf(str, sizeof(str), "[%4s:%llu.%06u]  %s", name_str,
+		(long long int)clock/1000000, // this cast need cause clock (uint64_t) may be 'long' or 'long long'
+		(int)clock%1000000, loglevel2str(level));
 	vsnprintf(str+sz, sizeof(str)-sz, fmt, args);
 	printf("%s", str);
 }

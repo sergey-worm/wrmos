@@ -9,9 +9,10 @@
 
 #define USE_MMU_ASSERT
 #include "mmu.h"
-#include "types.h"
 #include "printk.h"
-#include "sys-utils.h"
+#include "sys_types.h"
+#include "sys_utils.h"
+#include "wlibc_assert.h"
 #include <string.h>
 
 addr_t kmem_alloc(size_t sz, addr_t align);
@@ -26,7 +27,7 @@ inline word_t* create_table(size_t sz)
 {
 	word_t* tb = (word_t*) kmem_alloc(sz, sz);
 	if (!tb)
-		panic("%s:  faild to allocate table:  sz=%lx.", __func__, sz);
+		panic("%s:  faild to allocate table:  sz=%zx.", __func__, sz);
 	memset(tb, 0x0, sz);
 	return tb;
 }
@@ -86,8 +87,8 @@ public:
 	// print tables structure
 	static void print_structure()
 	{
-		printk("  lev=%u:  hi=%ld, lo=%ld, index_mask=0x%lx, offset_mask=0x%lx, pg_sz=0x%lx, tb_sz=0x%lx.\n",
-			Level,  Addr_index_hi, Addr_index_low, Index_mask, Offset_mask, Page_sz, Table_sz);
+		printk("  lev=%u:  hi=%d, lo=%d, index_mask=0x%lx, offset_mask=0x%lx, pg_sz=0x%lx, tb_sz=0x%x.\n",
+			Level,  Addr_index_hi, Addr_index_low, (long)Index_mask, (long)Offset_mask, (long)Page_sz, Table_sz);
 
 		Child_ptable::print_structure();
 	}
@@ -110,18 +111,18 @@ public:
 				size_t child_sz = Child_ptable::Table_bytes;
 				Child_ptable* child = (Child_ptable*) kmem_vaddr(child_pa, child_sz);
 				if (!child)
-					panic("Faild to get child table:  lev=%d, child_sz=%lx.", Level, child_sz);
+					panic("Faild to get child table:  lev=%d, child_sz=%zx.", Level, child_sz);
 				child->dump(start_va + mmu_index2va(Level, i));
 			}
 			else if (mmu_is_map(Level, cell))
 			{
 				printk("%*s L%u:  i=%3d:  map:  va=0x%lx, pa=0x%llx, sz=0x%lx, cached=%u, acc=%s.\n",
 					Indent, "", Level, i,
-					start_va + mmu_index2va(Level, i), mmu_get_map_pa(Level, cell), Page_sz,
+					start_va + mmu_index2va(Level, i), (long long)mmu_get_map_pa(Level, cell), (long)Page_sz,
 					mmu_get_map_cached(Level, cell), mmu_get_map_acc(Level, cell));
 			}
 			else
-				panic("Unknown cell type:  lev=%u, cell=0x%x.", Level, *cell);
+				panic("Unknown cell type:  lev=%u, cell=0x%lx.", Level, *cell);
 		}
 	}
 
@@ -168,7 +169,7 @@ public:
 			else if (mmu_is_map(Level, cell))
 				panic("%s:  L%u:  unexpected map record.\n", __func__, Level);
 			else
-				panic("Unknown cell type:  lev=%lu, cell=0x%lx.", Level, *cell);
+				panic("Unknown cell type:  lev=%u, cell=0x%lx.", Level, *cell);
 
 			child->set_dir(va, dir_level, dir_tb);
 		}
@@ -178,12 +179,12 @@ public:
 	{
 		//printk("Ptable::%s:  lev=%u:  va=%lx, pa=%llx, sz=0x%x.\n", __func__, Level, vaddr, paddr, size);
 
-		assert(mmu_isalign(vaddr, Cfg_page_sz));
-		assert(mmu_isalign(paddr, Cfg_page_sz));
-		assert(mmu_isalign(size, Cfg_page_sz));
-		assert(size <= Aspace_sz);
-		assert(access < 8);
-		assert(cachable < 2);
+		wassert(mmu_isalign(vaddr, Cfg_page_sz));
+		wassert(mmu_isalign(paddr, Cfg_page_sz));
+		wassert(mmu_isalign(size, Cfg_page_sz));
+		wassert(size <= Aspace_sz);
+		wassert(access < 8);
+		wassert(cachable < 2);
 
 		addr_t va = vaddr;
 		size_t rest = size;
@@ -201,9 +202,9 @@ public:
 				// L4:  Pages already mapped in the mappee’s address space that would conflict
 				//      with new mappings are implicitly unmapped before new pages are mapped.
 				if (!allow_over_map  &&  mmu_is_map(Level, cell))
-					panic("%s:  over mapping while allow_over_map=false:  lev=%u, va=%x.", __func__, Level, va);
+					panic("%s:  over mapping while allow_over_map=false:  lev=%u, va=%lx.", __func__, Level, va);
 				if (mmu_is_dir(Level, cell))
-					panic("IMPLME:  over mapping, need unmap old mapping:  lev=%u, va=%x.", Level, va);
+					panic("IMPLME:  over mapping, need unmap old mapping:  lev=%u, va=%lx.", Level, va);
 
 				mmu_set_map(Level, cell, paddr + va - vaddr, access, cachable);
 				va += Page_sz;
@@ -228,9 +229,9 @@ public:
 					child = (Child_ptable*) kmem_vaddr(child_pa, child_sz);
 				}
 				else if (mmu_is_map(Level, cell))
-					panic("Attempt to map, walk to next level ptable, but already mapped:  lev=%lu, va=%lx.", Level, va);
+					panic("Attempt to map, walk to next level ptable, but already mapped:  lev=%u, va=%lx.", Level, va);
 				else
-					panic("Unknown cell type:  lev=%lu, cell=0x%lx.", Level, *cell);
+					panic("Unknown cell type:  lev=%u, cell=0x%lx.", Level, *cell);
 
 				// map in child page
 				size_t len = min(rest, Page_sz - (va & Offset_mask));
@@ -249,9 +250,9 @@ public:
 	{
 		//printk("Ptable::%s:  lev=%u:  va=%lx, sz=0x%lx.\n", __func__, Level, vaddr, size);
 
-		assert(mmu_isalign(vaddr, Cfg_page_sz));
-		assert(mmu_isalign(size, Cfg_page_sz));
-		assert(size <= Aspace_sz);
+		wassert(mmu_isalign(vaddr, Cfg_page_sz));
+		wassert(mmu_isalign(size, Cfg_page_sz));
+		wassert(size <= Aspace_sz);
 
 		addr_t va = vaddr;
 		size_t rest = size;
@@ -259,7 +260,7 @@ public:
 		{
 			word_t* cell = get_cell(va);
 			size_t len = 0;
-			//printk("Ptable::%s:  lev=%lu:  va=%lx, cell=%lx/%2lx, cell_val=0x08%lx.\n",
+			//printk("Ptable::%s:  lev=%u:  va=%lx, cell=%lx/%2lx, cell_val=0x08%lx.\n",
 			//	__func__, Level, va, cell, (va & Index_mask) >> Addr_index_low, *cell);
 
 			if (mmu_is_dir(Level, cell))
@@ -277,13 +278,13 @@ public:
 				if (rest < Page_sz)
 					panic("Unmap high-level table but need low-level:  lev=%u, cell_val=0x08%lx.", Level, *cell);
 				len = Page_sz;
+				mmu_set_inv(Level, cell);
 			}
 			else if (mmu_is_inv(Level, cell))
 			{
-				panic("Unmap but all or part of region is not mapped:  lev=%u, cell_val=0x08%lx.", Level, *cell);
+				len = min(rest, Page_sz);
+				//panic("Unmap but all or part of region is not mapped:  lev=%u, cell_val=0x08%lx.", Level, *cell);
 			}
-
-			mmu_set_inv(Level, cell);
 
 			va += len;
 			rest -= len;
@@ -296,11 +297,11 @@ public:
 	// TODO:  in another place do get_sg_list()
 	paddr_t walk(addr_t vaddr, size_t size)
 	{
-		//printk("Ptable::%s:  lev=%lu:  va=%lx, sz=0x%lx.\n", __func__, Level, vaddr, size);
+		//printk("Ptable::%s:  lev=%u:  va=%lx, sz=0x%lx.\n", __func__, Level, vaddr, size);
 
-		assert(mmu_isalign(vaddr, Cfg_page_sz));
-		assert(mmu_isalign(size, Cfg_page_sz));
-		assert(size <= Aspace_sz);
+		wassert(mmu_isalign(vaddr, Cfg_page_sz));
+		wassert(mmu_isalign(size, Cfg_page_sz));
+		wassert(size <= Aspace_sz);
 
 		paddr_t pa = 0;
 		addr_t va = vaddr;
@@ -309,7 +310,7 @@ public:
 		{
 			word_t* cell = get_cell(va);
 			size_t len = 0;
-			//printk("Ptable::%s:  lev=%lu:  va=%lx, cell=%lx/%2lx, cell_val=0x08%lx.\n",
+			//printk("Ptable::%s:  lev=%u:  va=%lx, cell=%lx/%2lx, cell_val=0x08%lx.\n",
 			//	__func__, Level, va, cell, (va & Index_mask) >> Addr_index_low, *cell);
 
 			if (mmu_is_inv(Level, cell))
@@ -337,7 +338,7 @@ public:
 					pa = mmu_get_map_pa(Level, cell) + (va & Offset_mask);
 			}
 			else
-				panic("Unknown cell type:  lev=%lu, cell=0x%lx.", Level, *cell);
+				panic("Unknown cell type:  lev=%u, cell=0x%lx.", Level, *cell);
 
 			va += len;
 			rest -= len;
@@ -421,7 +422,7 @@ public:
 	{
 		printk("Pgtab::%s:  hello.\n", __func__);
 
-		assert(!kerntb[0] && "Already inited.");
+		wassert(!kerntb[0] && "Already inited.");
 
 		#ifdef USE_CTXTB
 		// create context ptable (L0)
@@ -439,8 +440,8 @@ public:
 	explicit Pgtab(unsigned ctx) : ctxid(ctx)
 	{
 		printk("Pgtab::%s:  hello, ctx=%u.\n", __func__, ctx);
-		assert(ctx <= 0xff);
-		assert(kerntb[0] && "Not inited!");
+		wassert(ctx <= 0xff);
+		wassert(kerntb[0] && "Not inited!");
 
 		// create root ptable
 		roottb = (Ptable_l1*) create_table(Ptable_l1::Table_bytes);
@@ -482,33 +483,33 @@ public:
 	// map in root ptable
 	inline void map(addr_t va, paddr_t pa, size_t sz, unsigned access, unsigned cachable)
 	{
-		// TODO:  assert(not-in-kerntb)
+		// TODO:  wassert(not-in-kerntb)
 		roottb->map(va, pa, sz, access, cachable, true);
 	}
 
 	// unmap in root ptable
 	inline void unmap(addr_t va, size_t sz)
 	{
-		// TODO:  assert(not-in-kerntb)
+		// TODO:  wassert(not-in-kerntb)
 		roottb->unmap(va, sz);
 	}
 
 	// walk in root ptable
 	inline paddr_t walk(addr_t va, size_t sz)
 	{
-		// TODO:  assert(not-in-kerntb)
+		// TODO:  wassert(not-in-kerntb)
 		return roottb->walk(va, sz);
 	}
 
 	// map in kernel ptable
 	static inline void kmap(addr_t va, paddr_t pa, size_t sz, unsigned access, unsigned cachable)
 	{
-		assert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
-		assert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va) + Kspace_sz);
+		wassert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
+		wassert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va) + Kspace_sz);
 		while (sz)
 		{
 			unsigned index = (va - Kern_va) / Ktab_t::Aspace_sz;
-			assert(index < Ktbs);
+			wassert(index < Ktbs);
 			size_t rest_to_tb_end = Ktab_t::Aspace_sz - (va & (Ktab_t::Aspace_sz - 1));
 
 			size_t s = is_aligned(va, Ktab_t::Aspace_sz) ? min(sz, Ktab_t::Aspace_sz) :
@@ -523,8 +524,8 @@ public:
 	// unmap in kernel ptable
 	static inline void kunmap(addr_t va, size_t sz)
 	{
-		assert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
-		assert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va + Kspace_sz));
+		wassert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
+		wassert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va + Kspace_sz));
 		unsigned index = (va - Kern_va) / Ktab_t::Aspace_sz;
 		kerntb[index]->unmap(va, sz);
 	}
@@ -532,8 +533,8 @@ public:
 	// walk in kernel ptable
 	static inline paddr_t kwalk(addr_t va, size_t sz)
 	{
-		assert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
-		assert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va) + Kspace_sz);
+		wassert(va >= Kern_va  &&  va < (Kern_va + Kspace_sz));
+		wassert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va) + Kspace_sz);
 		unsigned index = (va - Kern_va) / Ktab_t::Aspace_sz;
 		return kerntb[index]->walk(va, sz);
 	}

@@ -8,9 +8,9 @@
 #include "wrm_mpool.h"
 #include "wrm_log.h"
 #include "wrm_labels.h"
-#include "l4api.h"
-#include "string.h"
-#include "assert.h"
+#include "l4_api.h"
+#include <assert.h>
+#include <string.h>
 
 enum
 {
@@ -27,9 +27,12 @@ extern "C" int wrm_nthread_register(const char* name, word_t* key0, word_t* key1
 	L4_utcb_t* utcb = l4_utcb();
 
 	unsigned words = round_up(name_len, sizeof(word_t)) / sizeof(word_t);
-	utcb->msgtag().ipc_label(Wrm_ipc_register_thread);
-	utcb->msgtag().untyped(words);
-	utcb->msgtag().typed(0);
+	L4_msgtag_t tag;
+	tag.ipc_label(Wrm_ipc_register_thread);
+	tag.propagated(false);
+	tag.untyped(words);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->acceptor(L4_acceptor_t(L4_fpage_t::create_nil(), false));
 
 	word_t n [Name_len_max / sizeof(word_t)];
@@ -40,7 +43,7 @@ extern "C" int wrm_nthread_register(const char* name, word_t* key0, word_t* key1
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
 	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
-	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), from);
+	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from);
 	if (rc)
 	{
 		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
@@ -49,7 +52,7 @@ extern "C" int wrm_nthread_register(const char* name, word_t* key0, word_t* key1
 
 	assert(from == alpha);
 
-	L4_msgtag_t tag = utcb->msgtag();
+	tag = utcb->msgtag();
 	word_t ecode = utcb->mr[1];  // error code
 	word_t k0    = utcb->mr[2];  // key word 0
 	word_t k1    = utcb->mr[3];  // key word 1
@@ -64,7 +67,7 @@ extern "C" int wrm_nthread_register(const char* name, word_t* key0, word_t* key1
 
 	if (ecode) // error reply
 	{
-		wrm_loge("%s:  Wrm_ipc_register_thread failed, ecode=%u.\n", __func__, ecode);
+		wrm_loge("%s:  Wrm_ipc_register_thread failed, ecode=%lu.\n", __func__, ecode);
 		if (ecode == 1)  return 4;  // no app
 		if (ecode == 2)  return 5;  // no device
 		if (ecode == 3)  return 6;  // no permission
@@ -86,9 +89,12 @@ extern "C" int wrm_nthread_get_id(const char* name, L4_thrid_t* id, word_t* key0
 	L4_utcb_t* utcb = l4_utcb();
 
 	unsigned words = round_up(name_len, sizeof(word_t)) / sizeof(word_t);
-	utcb->msgtag().ipc_label(Wrm_ipc_get_thread_id);
-	utcb->msgtag().untyped(words);
-	utcb->msgtag().typed(0);
+	L4_msgtag_t tag;
+	tag.ipc_label(Wrm_ipc_get_thread_id);
+	tag.propagated(false);
+	tag.untyped(words);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->acceptor(L4_acceptor_t(L4_fpage_t::create_nil(), false));
 
 	word_t n [Name_len_max / sizeof(word_t)];
@@ -99,7 +105,7 @@ extern "C" int wrm_nthread_get_id(const char* name, L4_thrid_t* id, word_t* key0
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
 	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
-	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), from);
+	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from);
 	if (rc)
 	{
 		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
@@ -108,7 +114,7 @@ extern "C" int wrm_nthread_get_id(const char* name, L4_thrid_t* id, word_t* key0
 
 	assert(from == alpha);
 
-	L4_msgtag_t tag = utcb->msgtag();
+	tag = utcb->msgtag();
 	word_t ecode = utcb->mr[1];  // error code
 	word_t thrid = utcb->mr[2];  // thread ID
 	word_t k0    = utcb->mr[3];  // key word 0
@@ -124,7 +130,7 @@ extern "C" int wrm_nthread_get_id(const char* name, L4_thrid_t* id, word_t* key0
 
 	if (ecode) // error reply
 	{
-		wrm_loge("%s:  Wrm_ipc_get_thread_id failed, ecode=%u.\n", __func__, ecode);
+		wrm_loge("%s:  Wrm_ipc_get_thread_id failed, ecode=%lu.\n", __func__, ecode);
 		if (ecode == 1)  return 4;  // no app
 		if (ecode == 2)  return 5;  // no device
 		if (ecode == 3)  return 6;  // no permission

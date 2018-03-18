@@ -6,9 +6,9 @@
 
 #include "wrm_sem.h"
 #include "wrm_log.h"
-#include "l4api.h"
-#include "assert.h"
-#include "string.h"
+#include "l4_api.h"
+#include <assert.h>
+#include <string.h>
 
 // return ipc err code
 static int suspend(int timeout_usec)
@@ -25,12 +25,12 @@ static int suspend(int timeout_usec)
 	utcb->msgtag(tag);    // NOTE:  label for rcv
 
 	// wait sw irq
-	int rc = l4_receive(utcb->global_id(), timeout, from);
+	int rc = l4_receive(utcb->global_id(), timeout, &from);
 
 	// checkings
 	//wrm_logd("sem:  suspend:  wait unlock ipc for %d usec: rc=%d, from=%u, id=%u.\n",
 	//	timeout_usec, rc, from.number(), utcb->global_id().number());
-	assert(!rc || rc == Ipc_timeout);
+	assert(!rc || rc == L4_ipc_timeout);
 	assert(rc  || from == utcb->global_id());
 	//assert(rc  || tag.ipc_label() == 0x202);  // 0x202 - sw irq msg
 
@@ -50,7 +50,7 @@ static void resume(L4_thrid_t thr)
 
 	if (rc)
 	{
-		wrm_loge("sem:  resume:  sent ipc (sw irq), rc=%d, to=0x%x/%u.\n", rc, thr.raw(), thr.number());
+		wrm_loge("sem:  resume:  sent ipc (sw irq), rc=%d, to=0x%lx/%u.\n", rc, thr.raw(), thr.number());
 		assert(0 && "l4_send() failed.");
 	}
 
@@ -61,13 +61,13 @@ extern "C" int wrm_sem_init(Wrm_sem_t* sem, int mode, unsigned value)
 {
 	if (mode != Wrm_sem_counting  &&  mode != Wrm_sem_binary)
 	{
-		wrm_loge("sem=0x%x:  init:  wrong mode.\n", sem);
+		wrm_loge("sem=0x%p:  init:  wrong mode.\n", sem);
 		return 1;
 	}
 
 	if (value > Wrm_sem_t::Value_max)
 	{
-		wrm_loge("sem=0x%x:  init:  too big value.\n", sem);
+		wrm_loge("sem=0x%p:  init:  too big value.\n", sem);
 		return 2;
 	}
 
@@ -90,7 +90,7 @@ extern "C" int wrm_sem_value(Wrm_sem_t* sem, unsigned value)
 {
 	if (value > Wrm_sem_t::Value_max)
 	{
-		wrm_loge("sem=0x%x:  init:  too big value.\n", sem);
+		wrm_loge("sem=0x%p:  init:  too big value.\n", sem);
 		return 2;
 	}
 
@@ -105,7 +105,7 @@ extern "C" int wrm_sem_value(Wrm_sem_t* sem, unsigned value)
 // return 1 if found and 0 if not found
 static int dequeue(Wrm_sem_t* sem, L4_thrid_t thr)
 {
-	//wrm_logd("sem=0x%x:  wait:  timeout, erase ptr (rp=%u, wp=%u).\n", sem, sem->rp, sem->wp);
+	//wrm_logd("sem=0x%p:  wait:  timeout, erase ptr (rp=%u, wp=%u).\n", sem, sem->rp, sem->wp);
 	unsigned p = sem->rp;
 	bool found = false;
 	while (p != sem->wp)
@@ -119,7 +119,7 @@ static int dequeue(Wrm_sem_t* sem, L4_thrid_t thr)
 	}
 	if (found)
 		sem->wp = !sem->wp ? (Wrm_sem_t::Queue_length - 1)  : (sem->wp - 1);
-	//wrm_logd("sem=0x%x:  wait:  timeout, erased (rp=%u, wp=%u).\n", sem, sem->rp, sem->wp);
+	//wrm_logd("sem=0x%p:  wait:  timeout, erased (rp=%u, wp=%u).\n", sem, sem->rp, sem->wp);
 	return found;
 }
 
@@ -138,12 +138,12 @@ static int exist_in_queue(Wrm_sem_t* sem, L4_thrid_t thr)
 
 extern "C" int wrm_sem_wait(Wrm_sem_t* sem, int timeout_usec)
 {
-	//wrm_logd("sem=0x%x:  wait:  entry.\n", sem);
+	//wrm_logd("sem=0x%p:  wait:  entry.\n", sem);
 	L4_thrid_t self = l4_utcb()->global_id();
 
 	if (timeout_usec < 0  &&  timeout_usec != Wrm_sem_timeout_infinite)
 	{
-		wrm_loge("sem=0x%x:  wait:  wrong timeout=%d.\n", sem, timeout_usec);
+		wrm_loge("sem=0x%p:  wait:  wrong timeout=%d.\n", sem, timeout_usec);
 		return 1;
 	}
 
@@ -167,14 +167,14 @@ extern "C" int wrm_sem_wait(Wrm_sem_t* sem, int timeout_usec)
 	unsigned next_wp = (sem->wp + 1) == Wrm_sem_t::Queue_length  ?  0  :  (sem->wp + 1);
 	if (next_wp == sem->rp)
 	{
-		wrm_loge("sem=0x%x:  wait:  waiting queue is full.\n", sem);
+		wrm_loge("sem=0x%p:  wait:  waiting queue is full.\n", sem);
 		wrm_spinlock_unlock(&sem->lock);
 		return 2;  // waiting queue is full
 	}
 
 	sem->wait_queue[sem->wp] = self;
 	sem->wp = next_wp;
-	//wrm_logd("sem=0x%x:  wait:  enqueue:  rp=%u, wp=%u.\n", sem, sem->rp, sem->wp);
+	//wrm_logd("sem=0x%p:  wait:  enqueue:  rp=%u, wp=%u.\n", sem, sem->rp, sem->wp);
 	wrm_spinlock_unlock(&sem->lock);
 
 	int rc = 0;
@@ -197,23 +197,23 @@ extern "C" int wrm_sem_wait(Wrm_sem_t* sem, int timeout_usec)
 		wrm_spinlock_lock(&sem->lock);
 		int found = dequeue(sem, self);
 		wrm_spinlock_unlock(&sem->lock);
-		if (!found  &&  rc == Ipc_timeout)
+		if (!found  &&  rc == L4_ipc_timeout)
 		{
-			wrm_logw("sem=0x%x:  wait:  post done, but timeout -> assume suspend ok.\n", sem);
+			wrm_logw("sem=0x%p:  wait:  post done, but timeout -> assume suspend ok.\n", sem);
 			rc = 0;  // post has been done but timeout occured -> assume suspend was succes
 		}
 	}
 
-	return !rc ? 0 : (rc==Ipc_timeout ? Wrm_sem_err_timeout : 3);
+	return !rc ? 0 : (rc==L4_ipc_timeout ? Wrm_sem_err_timeout : 3);
 }
 
 extern "C" int wrm_sem_post(Wrm_sem_t* sem)
 {
-	//wrm_logd("sem=0x%x:  post:  entry.\n", sem);
+	//wrm_logd("sem=0x%p:  post:  entry.\n", sem);
 	wrm_spinlock_lock(&sem->lock);
 	if (sem->value == Wrm_sem_t::Value_max)
 	{
-		wrm_loge("sem=0x%x:  post:  too big value, max=%u, overflow.\n", sem, Wrm_sem_t::Value_max);
+		wrm_loge("sem=0x%p:  post:  too big value, max=%u, overflow.\n", sem, Wrm_sem_t::Value_max);
 		wrm_spinlock_unlock(&sem->lock);
 		return 1;
 	}
@@ -222,7 +222,7 @@ extern "C" int wrm_sem_post(Wrm_sem_t* sem)
 	if (sem->wp != sem->rp)
 	{
 		// exist waiting threads --> resume, don't increment sem value
-		//wrm_logd("sem=0x%x:  post:  resume waiting thread.\n", sem);
+		//wrm_logd("sem=0x%p:  post:  resume waiting thread.\n", sem);
 		assert(!sem->value);
 		thr = sem->wait_queue[sem->rp];
 		assert(thr != l4_utcb()->global_id());
@@ -231,7 +231,7 @@ extern "C" int wrm_sem_post(Wrm_sem_t* sem)
 	else
 	{
 		// no waiting threads --> just increment sem value
-		//wrm_logd("sem=0x%x:  post:  no waiting threads.\n", sem);
+		//wrm_logd("sem=0x%p:  post:  no waiting threads.\n", sem);
 		sem->value++;
 		if (sem->mode == Wrm_sem_binary)
 			sem->value = 1;

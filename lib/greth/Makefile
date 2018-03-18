@@ -12,7 +12,6 @@ baseflags := -Wall -Werror -pedantic -pedantic-errors
 baseflags += -fno-builtin # don't use builtin printf()
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG

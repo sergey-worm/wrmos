@@ -7,7 +7,7 @@
 #ifndef THRID_H
 #define THRID_H
 
-#include "l4types.h"
+#include "l4_types.h"
 
 inline L4_thrid_t thrid_sigma0()
 {

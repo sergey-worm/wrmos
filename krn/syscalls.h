@@ -15,6 +15,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_thread_switch(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_schedule(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_ipc(Thread_t& cur, Entry_frame_t& eframe);
+void syscall_unmap(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe);
 void syscall_kdb(Thread_t& cur, Entry_frame_t& eframe);

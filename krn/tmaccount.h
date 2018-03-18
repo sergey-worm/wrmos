@@ -1,6 +1,6 @@
 //##################################################################################################
 //
-//  Time account - account timeslice, and time spans for profile kernel and applications.
+//  Time account - account time spans for profile kernel and applications.
 //
 //##################################################################################################
 
@@ -13,18 +13,16 @@ class Time_account_t
 	enum
 	{
 		// thread's live cycle
-		Tp_resume,         // resume thread point
-		Tp_kexit_start,    // last kernel C-code
-		Tp_kexit_end,      // last kernel ASM-code, next will user code
-		Tp_kentry_start,   // first kernel ASM-code
-		Tp_kentry_end,     // first kernel C-code
-		Tp_suspend,        // suspend thread point
-		// profiler points
-		Tp_kwork_1s,        // start of span kwork1
-		Tp_kwork_2s,        // start of span kwork2
-		Tp_kwork_3s,        // start of span kwork3
-		// timeslice
-		Tp_update_times,    // update timeslice point
+		Tp_resume,                  // resume thread point
+		Tp_kexit_start,             // last kernel C-code
+		Tp_kexit_end,               // last kernel ASM-code, next will user code
+		Tp_kentry_start,            // first kernel ASM-code
+		Tp_kentry_end,              // first kernel C-code
+		Tp_suspend,                 // suspend thread point
+		// profiler points          
+		Tp_kwork_1s,                // start of span kwork1
+		Tp_kwork_2s,                // start of span kwork2
+		Tp_kwork_3s,                // start of span kwork3
 		// array size
 		Tp_max
 	};
@@ -33,10 +31,10 @@ class Time_account_t
 	enum
 	{
 		// thread's live cycle
-		Ts_execution,           // whole execution timespan
-		Ts_kentry,              // ASM entry code timespan
-		Ts_kwork,               // kernel work timeslice
-		Ts_kexit,               // ASM exit code timespan
+		Ts_execution,               // whole execution timespan
+		Ts_kentry,                  // ASM entry code timespan
+		Ts_kwork,                   // kernel work timespan
+		Ts_kexit,                   // ASM exit code timespan
 		// profiler intervals
 		Ts_kwork_1,
 		Ts_kwork_2,
@@ -47,22 +45,12 @@ class Time_account_t
 
 	const char* thr_name;           // thread name
 	L4_clock_t  points[Tp_max];     // profiler points
-	unsigned    remaning_timeslice; // remaning timeslice
 	L4_clock_t  spans[Ts_max];      // profiler timespans
 	unsigned    prev_point;         //
 
-	void update_timeslice(L4_clock_t now)
-	{
-		L4_clock_t exec_time = now - points[Tp_update_times];
-		//printf("%s:  %s:  remaning_timeslice:  %u -> %u.\n", __func__, cur_thr_name(),
-		//	remaning_timeslice, remaning_timeslice - min(exec_time, remaning_timeslice));
-		remaning_timeslice -= min(exec_time, remaning_timeslice);
-		points[Tp_update_times] = now;
-	}
-
 public:
 
-	Time_account_t(const char* n) : thr_name(n), remaning_timeslice(0), prev_point(Tp_suspend)
+	Time_account_t(const char* n) : thr_name(n), prev_point(Tp_suspend)
 	{
 		for (int i=0; i<Tp_max; ++i)
 			points[i] = 0;
@@ -70,8 +58,6 @@ public:
 			spans[i] = 0;
 	}
 
-	void timeslice(unsigned v) { remaning_timeslice = v; }
-	unsigned timeslice() const { return remaning_timeslice; }
 	L4_clock_t tmspan_exec()     const { return spans[Ts_execution]; }
 	L4_clock_t tmspan_uexec()    const { return tmspan_exec() - tmspan_kexec(); }
 	L4_clock_t tmspan_kexec()    const { return tmspan_kentry() + tmspan_kwork() + tmspan_kexit(); }
@@ -83,23 +69,21 @@ public:
 	L4_clock_t tmspan_kwork3()   const { return spans[Ts_kwork_3]; }
 	L4_clock_t tmpoint_suspend() const { return points[Tp_suspend]; }
 
-	// point for decrement timeslice
 	void tmevent_tick(L4_clock_t now)
 	{
-		update_timeslice(now);
+		(void)now;
 	}
 
 	const char* name(int point)
 	{
 		switch (point)
 		{
-			case Tp_resume:        return "resume";
-			case Tp_kexit_start:   return "kexit_start";
-			case Tp_kexit_end:     return "kexit_end";
-			case Tp_kentry_start:  return "kentry_start";
-			case Tp_kentry_end:    return "kentry_end";
-			case Tp_suspend:       return "suspend";
-			case Tp_update_times:  return "update_times";
+			case Tp_resume:            return "resume";
+			case Tp_kexit_start:       return "kexit_start";
+			case Tp_kexit_end:         return "kexit_end";
+			case Tp_kentry_start:      return "kentry_start";
+			case Tp_kentry_end:        return "kentry_end";
+			case Tp_suspend:           return "suspend";
 		};
 		return "__unknown_tp_name__";
 	}
@@ -109,7 +93,6 @@ public:
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
 		assert(prev_point == Tp_suspend);
-		points[Tp_update_times] = now;
 		prev_point = Tp_resume;
 		points[prev_point] = now;
 	}
@@ -118,7 +101,7 @@ public:
 	void tmevent_kexit_start(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume  ||  prev_point == Tp_kexit_start);
 		spans[Ts_execution] += now - points[prev_point];
 		spans[Ts_kwork]     += now - points[prev_point];
 		prev_point = Tp_kexit_start;
@@ -129,7 +112,7 @@ public:
 	void tmevent_kentry_end(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_kexit_start  ||  prev_point == Tp_resume);
+		assert(prev_point == Tp_kexit_start  ||  prev_point == Tp_resume  ||  prev_point == Tp_kentry_end);
 
 		// account whole execution timespan
 		spans[Ts_execution] += now - points[prev_point];
@@ -140,13 +123,14 @@ public:
 		// NOTE 1:  first kentry doesn't have point Tp_kexit_start
 		// NOTE 2:  in qemu timer.value=0 hangs some time --> may be (start == exit == xxx9999)
 		extern int cur_kexit_end;
-		if (cur_kexit_end != -1  &&  points[Tp_kexit_start])
+		if (cur_kexit_end != -1  && points[Tp_kexit_start])
 		{
 			L4_clock_t end = Timer::usec_from_raw_value(cur_kexit_end);
 			end += points[Tp_kexit_start] / Cfg_krn_tick_usec * Cfg_krn_tick_usec;
 			end += end < points[Tp_kexit_start]  ?  Cfg_krn_tick_usec  :  0;
 			assert(end >= points[Tp_kexit_start]);
-			assert(end - points[Tp_kexit_start] < 300); // for qemu timespan may be big (<300)
+			//printf("s=%llu,  e=%llu.\n", points[Tp_kexit_start], end);
+			assert(end - points[Tp_kexit_start] < 500); // for qemu timespan may be big (<500)
 			points[Tp_kexit_end] = end;
 			spans[Ts_kexit] += points[Tp_kexit_end] - points[Tp_kexit_start];
 		}
@@ -159,7 +143,7 @@ public:
 			start += points[Tp_kentry_end] / Cfg_krn_tick_usec * Cfg_krn_tick_usec;
 			start -= ((points[Tp_kentry_end] - start) > Cfg_krn_tick_usec)  ?  Cfg_krn_tick_usec  :  0;
 			assert((points[Tp_kentry_end] - start) < Cfg_krn_tick_usec);
-			assert((points[Tp_kentry_end] - start) < 300); // for qemu timespan may be big (<300)
+			assert((points[Tp_kentry_end] - start) < 500); // for qemu timespan may be big (<500)
 			points[Tp_kentry_start] = start;
 			spans[Ts_kentry] += points[Tp_kentry_end] - points[Tp_kentry_start];
 		}
@@ -170,7 +154,6 @@ public:
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
 		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
-		update_timeslice(now);
 		spans[Ts_execution] += now - points[prev_point];
 		spans[Ts_kwork]     += now - points[prev_point];
 		prev_point = Tp_suspend;

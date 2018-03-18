@@ -7,7 +7,7 @@
 #include "greth.h"
 #include <stdint.h>
 
-#ifdef Cfg_debug
+#ifdef DEBUG
 #  define print(...)  if (dev->dprint) dev->dprint(__VA_ARGS__)
 #else
 #  define print(...) { (void)dev; }
@@ -201,7 +201,7 @@ inline static void cache_flush(volatile void* ptr)
 
 inline static void dump_tx_desc(const Greth_dev_t* dev, const char* lable, volatile Tx_desc_t* d)
 {
-	#ifdef Cfg_debug
+	#ifdef DEBUG
 	print("%s  desc=0x%x, al=%d, ue=%d, ie=%d, wr=%d, en=%d, len=%d, addr=0x%x\n",
 		lable, d, d->al, d->ue, d->ie, d->wr, d->en, d->len, d->addr);
 	#else
@@ -213,7 +213,7 @@ inline static void dump_tx_desc(const Greth_dev_t* dev, const char* lable, volat
 
 inline static void dump_rx_desc(const Greth_dev_t* dev, const char* lable, volatile Rx_desc_t* d)
 {
-	#ifdef Cfg_debug
+	#ifdef DEBUG
 	print("%s  desc=0x%x, mc=%d, le=%d, oe=%d, ce=%d, ft=%d, ae=%d, ie=%d, wr=%d, en=%d, len=%d, addr=0x%x\n",
 		lable, d, d->mc, d->le, d->oe, d->ce, d->ft, d->ae, d->ie, d->wr, d->en, d->len, d->addr);
 	#else
@@ -225,7 +225,7 @@ inline static void dump_rx_desc(const Greth_dev_t* dev, const char* lable, volat
 
 void greth_dump(const Greth_dev_t* dev)
 {
-	#ifdef Cfg_debug
+	#ifdef DEBUG
 	print("regs:  0x%x\n", dev->regs);
 
 	volatile Greth_regs_t* regs = (void*) dev->regs;  // volatile!

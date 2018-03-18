@@ -15,7 +15,7 @@ enum Hwbp_flags_t
     Hwbp_rwx = Hwbp_r | Hwbp_w | Hwbp_x
 };
 */
-#include "sparc/hwbp.h"
+#include "sparc/sys_hwbp.h"
 
 // set hardware breakpoint
 int hwbp_set(int bpid, uint32_t addr, uint32_t mask, int flags)

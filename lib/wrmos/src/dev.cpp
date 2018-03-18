@@ -7,10 +7,9 @@
 #include "wrm_dev.h"
 #include "wrm_log.h"
 #include "wrm_labels.h"
-#include "l4api.h"
+#include "l4_api.h"
 #include <string.h>
-
-#include "assert.h"
+#include <assert.h>
 
 enum
 {
@@ -76,9 +75,12 @@ extern "C" int wrm_dev_map_io(const char* dev_name, addr_t* addr, size_t* size)
 	utcb->acceptor(L4_acceptor_t(vspace_fpage, false));
 
 	unsigned words = round_up(dev_name_len, sizeof(word_t)) / sizeof(word_t);
-	utcb->msgtag().ipc_label(Wrm_ipc_map_io);
-	utcb->msgtag().untyped(words);
-	utcb->msgtag().typed(0);
+	L4_msgtag_t tag;
+	tag.ipc_label(Wrm_ipc_map_io);
+	tag.propagated(false);
+	tag.untyped(words);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 
 	word_t name [Dev_name_len_max / sizeof(word_t)];
 	memcpy(name, dev_name, dev_name_len);
@@ -89,14 +91,14 @@ extern "C" int wrm_dev_map_io(const char* dev_name, addr_t* addr, size_t* size)
 	L4_time_t never(L4_time_t::Never);
 	//TODO: make api for get alpha ID
 	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1);
-	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), from); // send and receive
+	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
 		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
 		return -2;
 	}
 
-	L4_msgtag_t tag = utcb->msgtag();
+	tag = utcb->msgtag();
 	word_t ecode  = utcb->mr[1];  // err:  error code
 	word_t offset = utcb->mr[1];  // ok:   device addr offset in fpage
 	word_t sz     = utcb->mr[2];  // ok:   device space size
@@ -116,7 +118,7 @@ extern "C" int wrm_dev_map_io(const char* dev_name, addr_t* addr, size_t* size)
 
 	if (tag.untyped() == 1) // error reply
 	{
-		wrm_loge("%s:  Wrm_ipc_map_io failed, ecode=%u.\n", __func__, ecode);
+		wrm_loge("%s:  Wrm_ipc_map_io failed, ecode=%lu.\n", __func__, ecode);
 		if (ecode == 1)   // no app
 			return -4;
 		if (ecode == 2)   // no device
@@ -144,9 +146,12 @@ static int send_attach_detach_request(const char* dev_name, unsigned* intno, uns
 	L4_utcb_t* utcb = l4_utcb();
 
 	unsigned words = round_up(dev_name_len, sizeof(word_t)) / sizeof(word_t);
-	utcb->msgtag().ipc_label(action);
-	utcb->msgtag().untyped(words);
-	utcb->msgtag().typed(0);
+	L4_msgtag_t tag;
+	tag.ipc_label(action);
+	tag.propagated(false);
+	tag.untyped(words);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->acceptor(L4_acceptor_t(L4_fpage_t::create_nil(), false));
 
 	word_t name [Dev_name_len_max / sizeof(word_t)];
@@ -157,14 +162,14 @@ static int send_attach_detach_request(const char* dev_name, unsigned* intno, uns
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
 	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
-	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), from); // send and receive
+	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
 		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
 		return -2;
 	}
 
-	L4_msgtag_t tag = utcb->msgtag();
+	tag = utcb->msgtag();
 	word_t irq = utcb->mr[1];
 
 	if (alpha != from                        ||    // bad sender
@@ -211,10 +216,13 @@ extern "C" int wrm_dev_wait_int(unsigned intno, unsigned flags)
 {
 	L4_utcb_t* utcb = l4_utcb();
 	L4_msgtag_t tag;
+	tag.ipc_label(0);
+	tag.propagated(false);
 	tag.untyped(1);
+	tag.typed(0);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = flags;
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_thrid_t int_id = L4_thrid_t::create_global(intno, 1);
-	return l4_ipc(int_id, int_id, L4_timeouts_t(L4_time_t::Never, L4_time_t::Never), from);
+	return l4_ipc(int_id, int_id, L4_timeouts_t(L4_time_t::Never, L4_time_t::Never), &from);
 }

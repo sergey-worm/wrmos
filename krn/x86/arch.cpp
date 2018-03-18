@@ -5,8 +5,8 @@
 //##################################################################################################
 
 #include "arch.h"
-#include "stack.h"
-#include "processor.h"
+#include "sys_stack.h"
+#include "sys_proc.h"
 #include "x86_common.h"
 
 // data for x86 video output (video.h)
@@ -79,6 +79,7 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 }
 
 word_t xxx;
+word_t yyy;
 
 void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 {
@@ -88,7 +89,7 @@ void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 	// WORKAROUND:  To force use register instead of stack for cur/nxt call cur/nxt->utcb().
 	// FIXME:       Fix this workaround.
 	xxx = (word_t) cur_ksp;
-	xxx = (word_t) nxt_ksp;
+	yyy = (word_t) nxt_ksp;
 
 	// set utcb
 	*((word_t*)0xff000000) = nxt_utcb;

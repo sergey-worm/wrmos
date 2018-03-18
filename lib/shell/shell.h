@@ -26,7 +26,7 @@ class Shell_t
 			name_len = strlen(name);
 		}
 	};
-	typedef list_t <cmd_t, 8> cmds_t;
+	typedef list_t <cmd_t, 16> cmds_t;
 	cmds_t _cmds;
 
 	// history

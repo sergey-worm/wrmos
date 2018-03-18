@@ -9,6 +9,7 @@
 
 #include "mmu.h"
 #include "access.h"
+#include "wlibc_assert.h"
 
 inline unsigned acc2mmuacc(kacc_t acc)
 {
@@ -40,7 +41,7 @@ inline unsigned acc2mmuacc(kacc_t acc)
 		case Acc_kw_ur:   return Mmu_acc_krw_uro;
 	}
 	printk("%s:  acc=%d.\n", __func__, acc);
-	assert(false);
+	wassert(false);
 	return -1;
 }
 

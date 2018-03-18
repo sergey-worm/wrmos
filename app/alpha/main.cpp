@@ -4,18 +4,21 @@
 //
 //##################################################################################################
 
-#include "l4api.h"
+#include "l4_api.h"
 #include "wrmos.h"
-#include "panic.h"
 #include "list.h"
-#include "ramfs.h"
 #include "elfloader.h"
-#include "sys-utils.h"
-#include "libc_io.h"
+#include "sys_ramfs.h"
+#include "sys_utils.h"
+#include "sys_eframe.h"
+#include "wlibc_cb.h"
+#include "wlibc_panic.h"
+#include "krn-config.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <assert.h>
 
 //--------------------------------------------------------------------------------------------------
 // Cfg
@@ -73,9 +76,9 @@ public:
 
 	Board_cfg_t     brd;
 	Memory_region_t mems [Mems_max];
-	Wrm_app_cfg_t    apps [Apps_max];
+	Wrm_app_cfg_t   apps [Apps_max];
 
-	const Wrm_app_cfg_t*    apps_begin() const { return apps; }
+	const Wrm_app_cfg_t*   apps_begin() const { return apps; }
 	const Memory_region_t* mems_begin() const { return mems; }
 };
 
@@ -133,15 +136,15 @@ const bool parse_dev_config(const char* str, Mmio_device_t* devs, unsigned list_
 
 				if (word_len[0] >= sizeof(devs[cnt].name))
 				{
-					wrm_loge("wrong dev cfg (%u):  too big device name, max=%u.\n",
+					wrm_loge("wrong dev cfg (%u):  too big device name, max=%zu.\n",
 						line_cnt, sizeof(devs[cnt].name) - 1);
 					return false;
 				}
 
 				strncpy(devs[cnt].name, word_ptr[0], word_len[0]);
-				devs[cnt].pa  = strtoul(word_ptr[1], 0, 16);
-				devs[cnt].sz  = strtoul(word_ptr[2], 0, 16);
-				devs[cnt].irq = strtoul(word_ptr[3], 0, 10);
+				devs[cnt].pa  = !strncmp(word_ptr[1], "krn", 3) ? Cfg_krn_uart_paddr : strtoul(word_ptr[1], 0, 16);
+				devs[cnt].sz  = !strncmp(word_ptr[2], "krn", 3) ? Cfg_krn_uart_sz    : strtoul(word_ptr[2], 0, 16);
+				devs[cnt].irq = !strncmp(word_ptr[3], "krn", 3) ? Cfg_krn_uart_irq   : strtoul(word_ptr[3], 0, 10);
 
 				cnt++;
 			}
@@ -220,7 +223,7 @@ const bool parse_mem_config(const char* str, Memory_region_t* mems, unsigned lis
 
 				if (word_len[0] >= sizeof(mems[cnt].name))
 				{
-					wrm_loge("wrong mem cfg (%u):  too big memory name, max=%u.\n",
+					wrm_loge("wrong mem cfg (%u):  too big memory name, max=%zu.\n",
 						line_cnt, sizeof(mems[cnt].name) - 1);
 					return false;
 				}
@@ -281,6 +284,7 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 				//		short_name:   eth
 				//		file_path:    ramfs:/greth
 				//		stack_size:   0x1000
+				//		aspace_max:   1
 				//		threads_max:  3
 				//		prio_max:     150
 				//		fpu:          1
@@ -317,7 +321,7 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 						{
 							if (!val_len  ||  val_len >= sizeof(apps[app_cnt].name))
 							{
-								wrm_loge("wrong app cfg (%u):  'name' absent or too big, max=%u.\n",
+								wrm_loge("wrong app cfg (%u):  'name' absent or too big, max=%zu.\n",
 									line_cnt, sizeof(apps[app_cnt].name) - 1);
 								return false;
 							}
@@ -327,7 +331,7 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 						{
 							if (!val_len  ||  val_len >= sizeof(apps[app_cnt].short_name))
 							{
-								wrm_loge("wrong app cfg (%u):  'short_name' absent or too big, max=%u.\n",
+								wrm_loge("wrong app cfg (%u):  'short_name' absent or too big, max=%zu.\n",
 									line_cnt, sizeof(apps[app_cnt].short_name) - 1);
 								return false;
 							}
@@ -337,7 +341,7 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 						{
 							if (!val_len  ||  val_len >= sizeof(apps[app_cnt].filename))
 							{
-								wrm_loge("wrong app cfg (%u):  'file_path' absent or too big, max=%u.\n",
+								wrm_loge("wrong app cfg (%u):  'file_path' absent or too big, max=%zu.\n",
 									line_cnt, sizeof(apps[app_cnt].filename) - 1);
 								return false;
 							}
@@ -352,6 +356,21 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 							}
 							apps[app_cnt].stack_sz = strtoul(val_start, 0, 16);
 						}
+						else if (!strncmp(line, "\t\taspaces_max:", 14))
+						{
+							if (!val_len)
+							{
+								wrm_loge("wrong app cfg (%u):  'aspace_max' absent.\n", line_cnt);
+								return false;
+							}
+							apps[app_cnt].max_aspaces = strtoul(val_start, 0, 10);
+							if (!apps[app_cnt].max_aspaces || apps[app_cnt].max_aspaces > 16)
+							{
+								wrm_loge("wrong app cfg (%u):  'aspaces_max' 0 or too big, max=%d.\n",
+									line_cnt, 16);
+								return false;
+							}
+						}
 						else if (!strncmp(line, "\t\tthreads_max:", 14))
 						{
 							if (!val_len)
@@ -360,10 +379,10 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 								return false;
 							}
 							apps[app_cnt].max_threads = strtoul(val_start, 0, 10);
-							if (!apps[app_cnt].max_threads || apps[app_cnt].max_threads > 64)
+							if (!apps[app_cnt].max_threads || apps[app_cnt].max_threads > 32)
 							{
 								wrm_loge("wrong app cfg (%u):  'threads_max' 0 or too big, max=%d.\n",
-									line_cnt, 64);
+									line_cnt, 32);
 								return false;
 							}
 						}
@@ -506,7 +525,7 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 						}
 						else
 						{
-							wrm_loge("wrong app cfg (%u):  unknown param name, line=%u.\n", line_cnt);
+							wrm_loge("wrong app cfg (%u):  unknown param name.\n", line_cnt);
 							return false;
 						}
 					}
@@ -583,7 +602,7 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 	while (dev && *dev->name)
 	{
 		wrm_logi("    %2u  %-8s  0x%08llx   0x%08llx   %2d\n",
-			cnt, dev->name, dev->pa, dev->sz, dev->irq);
+			cnt, dev->name, (long long)dev->pa, (long long)dev->sz, dev->irq);
 		dev = Mmio_device_t::next(dev);
 		cnt++;
 	}
@@ -593,11 +612,86 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 	cnt = 0;
 	while (mem && *mem->name)
 	{
-		wrm_logi("    %2u  %8s  0x%08x       %d       %d\n",
+		wrm_logi("    %2u  %8s  0x%08zx       %d       %d\n",
 			cnt,  mem->name, mem->sz, mem->cached, mem->contig);
 		mem = Memory_region_t::next(mem);
 		cnt++;
 	}
+
+	#if 1 // new text format, not table
+
+	wrm_logi("  Apps config:\n");
+
+	char devs_str[32];
+	char mems_str[32];
+	char args_str[32];
+
+	const Wrm_app_cfg_t* app = proj_cfg->apps_begin();
+	cnt = 0;
+	while (app && *app->name)
+	{
+		// make device list
+		const Wrm_app_cfg_t::dev_name_t* dev = app->devs;
+		devs_str[0] = '\0';
+		while ((*dev)[0])
+		{
+			unsigned len = strlen(devs_str);
+			snprintf(devs_str+len, sizeof(devs_str)-len, "%d", get_dev_index(proj_cfg, *dev));
+			dev++;
+			if ((*dev)[0])
+			{
+				unsigned len = strlen(devs_str);
+				snprintf(devs_str+len, sizeof(devs_str)-len, ",");
+			}
+		}
+		// make device list
+		const Wrm_app_cfg_t::mem_name_t* mem = app->mems;
+		mems_str[0] = '\0';
+		while ((*mem)[0])
+		{
+			unsigned len = strlen(mems_str);
+			snprintf(mems_str+len, sizeof(mems_str)-len, "%d", get_mem_index(proj_cfg, *mem));
+			mem++;
+			if ((*mem)[0])
+			{
+				unsigned len = strlen(mems_str);
+				snprintf(mems_str+len, sizeof(mems_str)-len, ",");
+			}
+		}
+		// make arg list
+		const Wrm_app_cfg_t::arg_t* arg = app->args;
+		args_str[0] = '\0';
+		while ((*arg)[0])
+		{
+			unsigned len = strlen(args_str);
+			snprintf(args_str+len, sizeof(args_str)-len, "%s", *arg);
+			arg++;
+			if ((*arg)[0])
+			{
+				unsigned len = strlen(args_str);
+				snprintf(args_str+len, sizeof(args_str)-len, ", ");
+			}
+		}
+
+		wrm_logi("    [%u]\n", cnt);
+		wrm_logi("      name:         %s\n", app->name);
+		wrm_logi("      short_name:   %s\n", app->short_name);
+		wrm_logi("      file:         %s\n", app->filename);
+		wrm_logi("      stack_sz:     0x%x\n", app->stack_sz);
+		wrm_logi("      max_aspaces:  %u\n", app->max_aspaces);
+		wrm_logi("      max_threads:  %u\n", app->max_threads);
+		wrm_logi("      max_prio:     %u\n", app->max_prio);
+		wrm_logi("      fpu:          %u\n", app->fpu);
+		wrm_logi("      devices:      %s\n", devs_str);
+		wrm_logi("      memory:       %s\n", mems_str);
+		wrm_logi("      args:         %s\n", args_str);
+
+		cnt++;
+		app = Wrm_app_cfg_t::next(app);
+	}
+
+	#else  // table format
+
 	wrm_logi("  Apps config:\n");
 	wrm_logi("    ##  name      sname  file          thrs  prio   devs              mems         args\n");
 
@@ -659,6 +753,7 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 		cnt++;
 		app = Wrm_app_cfg_t::next(app);
 	}
+	#endif // 0
 }
 //--------------------------------------------------------------------------------------------------
 // ~ Cfg
@@ -685,15 +780,15 @@ public:
 
 	void dump() const
 	{
-		wrm_logw("Dump named memory regions (%u):\n", _regions.size());
+		wrm_logw("Dump named memory regions (%zu):\n", _regions.size());
 		for (regions_t::citer_t it=_regions.begin(); it!=_regions.end(); ++it)
 		{
-			wrm_logw("  %8s:  sz=0x%x, cached=%u, contig=%u, locations(%u):\n",
+			wrm_logw("  %8s:  sz=0x%zx, cached=%u, contig=%u, locations(%zu):\n",
 				it->region.name, it->region.sz, it->region.cached, it->region.contig, it->locations.size());
 
 			Named_region_t::locations_t::citer_t it2 = it->locations.begin();
 			for ( ; it2!=it->locations.end(); ++it2)
-				wrm_logw("    addr=0x%x, sz=0x%x.\n", it2->addr(), it2->size());
+				wrm_logw("    addr=0x%lx, sz=0x%lx.\n", it2->addr(), it2->size());
 		}
 	}
 
@@ -746,9 +841,11 @@ void get_memory_from_sigma0()
 
 	while (1)
 	{
-		utcb->msgtag().proto_label(L4_msgtag_t::Sigma0);
-		utcb->msgtag().untyped(2);
-		utcb->msgtag().typed(0);
+		L4_msgtag_t tag;
+		tag.proto_label(L4_msgtag_t::Sigma0);
+		tag.propagated(false);
+		tag.untyped(2);
+		tag.typed(0);
 		utcb->acceptor(L4_acceptor_t(L4_fpage_t::create_complete(), false));
 
 		L4_fpage_t req_fpage = L4_fpage_t::create(0, req_size, L4_fpage_t::Acc_rwx);
@@ -756,24 +853,25 @@ void get_memory_from_sigma0()
 		req_fpage.base(-1);
 		word_t req_attr = 0; // arch dependent attribs, 0 - default
 
+		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = req_fpage.raw();
 		utcb->mr[2] = req_attr;
 
 		L4_thrid_t from = L4_thrid_t::Nil;
 		L4_time_t never(L4_time_t::Never);
-		int res = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), from); // send and receive
+		int res = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), &from);
 		if (res)
 		{
 			wrm_logi("l4_ipc(sgm0) failed, res=%u.\n", res);
 			l4_kdb("Sending grant/map item is failed");
 		}
 
-		// copy msg to use printf below▫
-		L4_msgtag_t tag = utcb->msgtag();
-		word_t mr[64];
+		// copy msg to use printf below
+		tag = utcb->msgtag();
+		word_t mr[L4_utcb_t::Mr_words];
 		memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
-		//wrm_logi("received IPC:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
+		//wrm_logi("rx:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
 		//	from.raw(), from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 
 		assert(tag.untyped() == 0);
@@ -804,7 +902,7 @@ void get_memory_from_sigma0()
 		//wrm_mpool_dump();
 	}
 
-	wrm_logi("got memory:  %#x bytes.\n", wrm_mpool_size());
+	wrm_logi("got memory:  %#zx bytes.\n", wrm_mpool_size());
 }
 
 // Use MemoryControl privilaged system call
@@ -827,32 +925,30 @@ int do_iospace_request(L4_fpage_t iospace)
 	L4_utcb_t* utcb = l4_utcb();
 	const L4_thrid_t sgm0  = L4_thrid_t::create_global(l4_kip()->thread_info.user_base(), 1);
 
-
 	L4_msgtag_t tag;
 	tag.proto_label(L4_msgtag_t::Sigma0);
+	tag.propagated(false);
 	tag.untyped(2);
 	tag.typed(0);
 	utcb->acceptor().set(L4_fpage_t::create_complete(), false);
-
 	utcb->mr[0] = tag.raw();;
 	utcb->mr[1] = iospace.raw();
 	utcb->mr[2] = 0; // req_attribs - arch dependent, 0 - default
-
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
-	int rc = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), from); // send and receive
+	int rc = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), &from);
 	if (rc)
 	{
 		wrm_loge("l4_ipc(sgm0) failed, rc=%u.\n", rc);
 		return -1;
 	}
 
-	// copy msg to use printf below▫
+	// copy msg to use printf below
 	tag = utcb->msgtag();
-	word_t mr[64];
+	word_t mr[L4_utcb_t::Mr_words];
 	memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
-	//wrm_logi("received IPC:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
+	//wrm_logi("rx:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
 	//	from.raw(), from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 
 	assert(tag.untyped() == 0);
@@ -926,7 +1022,7 @@ void prepare_named_memory_regions(const Proj_cfg_t* proj_cfg)
 
 		if (!is_aligned(mem->sz, Cfg_page_sz))
 		{
-			wrm_loge("Wrong size=0x%x, for named memory '%s'.\n", mem->sz, mem->name);
+			wrm_loge("Wrong size=0x%zx, for named memory '%s'.\n", mem->sz, mem->name);
 			wrm_loge("Size should be aligned to page size.\n");
 			panic("Wrong config for named memory.");
 		}
@@ -934,7 +1030,7 @@ void prepare_named_memory_regions(const Proj_cfg_t* proj_cfg)
 		L4_fpage_t location = wrm_mpool_alloc(mem->sz);
 		if (location.is_nil())
 		{
-			wrm_loge("Could not allocate 0x%x bytes fot named memory '%s'.\n", mem->sz, mem->name);
+			wrm_loge("Could not allocate 0x%zx bytes fot named memory '%s'.\n", mem->sz, mem->name);
 			wrm_mpool_dump();
 			panic("Could not allocate memory.");
 		}
@@ -993,12 +1089,17 @@ const Proj_cfg_t* parse_project_config()
 	return proj_cfg;
 }
 
+static void break_execution(const char* str = 0)
+{
+	l4_kdb(str);
+}
+
 static void init_io()
 {
-	Libc_io_callbacks_t io;
-	io.out_char    = NULL;
-	io.out_string  = l4_out_string;
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = NULL;
+	cb->out_string = l4_kdb_putsn;
+	cb->break_exec = break_execution;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1069,7 +1170,7 @@ Named_threads_t::nthreads_t Named_threads_t::_nthreads;
 //--------------------------------------------------------------------------------------------------
 //  Requests handlers
 //--------------------------------------------------------------------------------------------------
-void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+static void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
 	// get pfault params
 	assert(tag.untyped() == 2);
@@ -1077,32 +1178,58 @@ void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	acc_t acc  = tag.pfault_access();
 	word_t addr = mr[1];
 	word_t inst = mr[2];
-	//wrmm_logi("pfault from 0x%x/%u:  addr=%x, acc=%s, inst=%x.\n", from.raw(), from.number(), addr, acc2str(acc), inst);
+	//wrm_logi("pfault from 0x%x/%u:  addr=%x, acc=%s, inst=%x.\n", from.raw(), from.number(), addr, acc2str(acc), inst);
 
 	// find local address for fault address
 	L4_fpage_t local_fpage;
 	int rc = wrm_app_location(from, addr, sizeof(word_t), acc, &local_fpage);
-	if (rc)
+	if (rc == -2) // location not found
 	{
-		wrm_loge("wrm_app_location(addr=0x%x, acc=%d) - rc=%d, thr=%u, inst=0x%x.\n",
+		//wrm_logd("pager could not resolve pfault:  thr=%u, va=0x%lx, acc=%d, inst=0x%lx.\n",
+		//	from.number(), addr, acc, inst);
+		local_fpage = L4_fpage_t::create_complete();  // to raise exception for fault thread
+	}
+	else if (rc)
+	{
+		wrm_loge("wrm_app_location(addr=0x%lx, acc=%d) - rc=%d, thr=%u, inst=0x%lx.\n",
 			addr, acc, rc, from.number(), inst);
-		l4_kdb("Roottask could not resolve pfault.");
+		l4_kdb("unexpected error, roottask internal error");
 	}
 
 	// grant/map
+	L4_map_item_t item = L4_map_item_t::create(local_fpage);
+	tag.ipc_label(0);
+	tag.propagated(false);
+	tag.untyped(0);
+	tag.typed(2);
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(0);
-	utcb->msgtag().propagated(false);
-	utcb->msgtag().untyped(0);
-	utcb->msgtag().typed(2);
-	L4_map_item_t* item = (L4_map_item_t*) &utcb->mr[1];
-	item->set(local_fpage);
+	utcb->mr[0] = tag.raw();
+	utcb->mr[1] = item.word0();
+	utcb->mr[2] = item.word1();
 	rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
 		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
+}
+
+static void process_exception(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+{
+	printf("\n");
+	wrm_loge("catch unhandled exception (%ld) from user thread id=%u:\n", tag.proto_label(), from.number());
+
+	if (tag.proto_label() == L4_msgtag_t::Mmu_exception)
+	{
+		wrm_loge("MMU exception:  addr=0x%lx, acc=%ld.\n\n", mr[1] & ~0x7, mr[1] & 0x7);
+	}
+
+	Entry_frame_t* eframe = (Entry_frame_t*) &mr[2];
+	eframe->dump(printf, false);
+
+	printf("\n");
+	wrm_loge("TODO:  terminate thread/task.\n");
+	panic("xxx");
 }
 
 void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
@@ -1137,7 +1264,7 @@ void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 		if (!cfg)
 		{
-			wrm_loge("No app for id=0x%x/%u.\n", from.raw(), from.number());
+			wrm_loge("No app for id=0x%lx/%u.\n", from.raw(), from.number());
 			ecode = 1;  // no app
 			break;
 		}
@@ -1191,18 +1318,20 @@ void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(Wrm_ipc_map_io);
-	utcb->msgtag().propagated(false);
+	tag.ipc_label(Wrm_ipc_map_io);
+	tag.propagated(false);
 	if (ecode)
 	{
-		utcb->msgtag().untyped(1);
-		utcb->msgtag().typed(0);
+		tag.untyped(1);
+		tag.typed(0);
+		utcb->mr[0] = tag.raw();;
 		utcb->mr[1] = ecode;
 	}
 	else
 	{
-		utcb->msgtag().untyped(2);
-		utcb->msgtag().typed(2);
+		tag.untyped(2);
+		tag.typed(2);
+		utcb->mr[0] = tag.raw();;
 		utcb->mr[1] = offset;
 		utcb->mr[2] = size;
 		utcb->mr[3] = mitem.word0();
@@ -1226,7 +1355,7 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 	assert(tag.untyped() <= Dev_name_words_max);
 	assert(tag.typed() == 0);
 	const char* dev_name = (const char*)&mr[1];
-	//wrm_logi("%stach_int:  dev=%.*s.\n", action==Wrm_ipc_attach_int?"at":"de", Dev_name_len_max, dev_name);
+	//wrm_logi("%atach_int:  dev=%.*s.\n", action==Wrm_ipc_attach_int?"at":"de", Dev_name_len_max, dev_name);
 
 	int ecode = 0;
 	size_t intno = -1;
@@ -1246,7 +1375,7 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 		}
 		if (!cfg)
 		{
-			wrm_loge("No app for id=0x%x/%u.\n", from.raw(), from.number());
+			wrm_loge("No app for id=0x%lx/%u.\n", from.raw(), from.number());
 			ecode = 1;  // no app
 			break;
 		}
@@ -1305,10 +1434,11 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(action);
-	utcb->msgtag().propagated(false);
-	utcb->msgtag().untyped(1);
-	utcb->msgtag().typed(0);
+	tag.ipc_label(action);
+	tag.propagated(false);
+	tag.untyped(1);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode ? -ecode : intno;
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
@@ -1355,7 +1485,7 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 		if (!cfg)
 		{
-			wrm_loge("No app for id=0x%x/%u.\n", from.raw(), from.number());
+			wrm_loge("No app for id=0x%lx/%u.\n", from.raw(), from.number());
 			ecode = 1;  // no app
 			break;
 		}
@@ -1394,18 +1524,20 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(Wrm_ipc_get_named_mem);
-	utcb->msgtag().propagated(false);
+	tag.ipc_label(Wrm_ipc_get_named_mem);
+	tag.propagated(false);
 	if (ecode)
 	{
-		utcb->msgtag().untyped(1);
-		utcb->msgtag().typed(0);
+		tag.untyped(1);
+		tag.typed(0);
+		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = ecode;
 	}
 	else
 	{
-		utcb->msgtag().untyped(4);
-		utcb->msgtag().typed(2);
+		tag.untyped(4);
+		tag.typed(2);
+		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = 0;                     // MSW of paddr
 		utcb->mr[2] = mitem.fpage().addr();  // LSW of paddr
 		utcb->mr[3] = cached;
@@ -1423,9 +1555,9 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
-	assert(tag.untyped() == 6);
+	assert(tag.untyped() == 5);
 	assert(tag.typed() == 0);
-	//wrm_logi("request:  thread=%c%c%c%c.\n", (mr[6]>>24)&0xff, (mr[6]>>16)&0xff, (mr[6]>>8)&0xff, mr[6]&0xff);
+	//wrm_logi("request:  create thread.\n");
 
 	int ecode = 0;
 	L4_thrid_t newid = L4_thrid_t::Nil;
@@ -1445,7 +1577,7 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 		if (!cfg)
 		{
-			wrm_loge("No app for id=0x%x/%u.\n", from.raw(), from.number());
+			wrm_loge("%s:  no app for id=0x%lx/%u.\n", __func__, from.raw(), from.number());
 			ecode = 1;  // no app
 			break;
 		}
@@ -1455,7 +1587,7 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		int rc = wrm_app_alloc_thrno(from, &newno);
 		if (rc)
 		{
-			wrm_loge("wrm_app_alloc_thrnum() failed, rc=%d.\n", rc);
+			wrm_loge("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
 			ecode = 2;  // no free threads
 			break;
 		}
@@ -1465,19 +1597,145 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		rc = wrm_app_max_prio(from, &max_prio);
 		if (rc)
 		{
-			wrm_loge("wrm_app_max_prio() failed, rc=%d.\n", rc);
+			wrm_loge("%s:  wrm_app_max_prio() - rc=%d.\n", __func__, rc);
 			ecode = 3;  // some error
 			break;
 		}
 
 		// create thread
 		newid = L4_thrid_t::create_global(newno, 7/* ver ??? */);
-		addr_t   rem_utcb   = mr[1];
-		addr_t   entry      = mr[2];
-		addr_t   stack      = mr[3];
-		size_t   stack_sz   = mr[4];
-		unsigned prio       = mr[5];
-		word_t   short_name = mr[6];
+		L4_fpage_t  rem_utcb = L4_fpage_t::create(mr[1]);
+		unsigned prio = mr[2];
+		L4_thrid_t space(mr[3]);
+		L4_thrid_t sched(mr[4]);
+		L4_thrid_t pager(mr[5]);
+
+		// check prio
+		if (prio > max_prio)
+		{
+			if (prio != 255)
+				wrm_logw("require prio=%u > max_prio=%u, decrease prio to max=%u.\n", prio, max_prio, max_prio);
+			prio = max_prio;
+		}
+
+		// find local addres for rem_utcb area
+		L4_fpage_t loc_utcb;
+		rc = wrm_app_location(from, rem_utcb.addr(), rem_utcb.size(), Acc_rw, &loc_utcb);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_location(utcb=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
+				__func__, rem_utcb.addr(), rem_utcb.size(), Acc_rw, rc);
+			ecode = 4;  // bad utcb
+			break;
+		}
+
+		// set default params if incomming is Any
+		L4_thrid_t alpha = l4_utcb()->global_id();
+		space = !space.is_any() ? space : from;   // default:  use 'from' aspace
+		sched = !sched.is_any() ? sched : alpha;  // default:  alpha to can set prio below via l4_schedule
+		pager = !pager.is_any() ? pager : alpha;  // default:  default pager
+
+		// create thread inside 'from' aspace via ThreadControl
+		rc = l4_thread_control(newid, space, sched, pager, loc_utcb.addr());
+		if (rc)
+		{
+			wrm_loge("%s:  l4_thread_control() - rc=%u.\n", __func__, rc);
+			ecode = 5;  // some error
+			break;
+		}
+
+		// set thread params via Schedule syscall, it should be done by thread scheduler
+		// XXX:  it may be outside Alpha, or not
+		rc = l4_schedule(newid, -1, -1, prio, -1);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_schedule() - rc=%d.\n", __func__, rc);
+			ecode = 6;  // some error
+			break;
+		}
+	} while (0);
+
+	// send reply
+	L4_utcb_t* utcb = l4_utcb();
+	tag.ipc_label(Wrm_ipc_create_thread);
+	tag.propagated(false);
+	tag.untyped(2);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
+	utcb->mr[1] = ecode;
+	utcb->mr[2] = newid.raw();
+	int rc = l4_send(from, L4_time_t::Never);
+	if (rc)
+	{
+		wrm_loge("%s:  l4_send(map) - rc=%u.\n", __func__, rc);
+		l4_kdb("Sending grant/map item is failed");
+	}
+}
+
+void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+{
+	assert(tag.untyped() == 4);
+	assert(tag.typed() == 0);
+	//wrm_logi("request:  create thread with new aspace.\n");
+
+	int ecode = 0;
+	L4_thrid_t newid = L4_thrid_t::Nil;
+	do
+	{
+		// find app cfg
+		const Wrm_app_cfg_t* cfg = app_config()->apps_begin();
+		unsigned from_num = from.number();
+		unsigned app_first_thread_num = l4_kip()->thread_info.user_base() + 2;
+		while (cfg)
+		{
+			if (from_num >= app_first_thread_num  &&
+			    from_num < (app_first_thread_num + cfg->max_threads))
+				break;
+			app_first_thread_num += cfg->max_threads;
+			cfg = Wrm_app_cfg_t::next(cfg);
+		}
+		if (!cfg)
+		{
+			wrm_loge("%s:  no app for id=0x%lx/%u.\n", __func__, from.raw(), from.number());
+			ecode = 1;  // no app
+			break;
+		}
+
+		// alloc new aspace
+		int rc = wrm_app_alloc_aspace(from);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_alloc_aspace() - rc=%d.\n", __func__, rc);
+			ecode = 2;  // no free threads
+			break;
+		}
+
+		// alloc thread number
+		unsigned newno = 0;
+		rc = wrm_app_alloc_thrno(from, &newno);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
+			ecode = 3;  // no free threads
+			break;
+		}
+
+		// get max prio for this app
+		unsigned max_prio = 0;
+		rc = wrm_app_max_prio(from, &max_prio);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_max_prio() - rc=%d.\n", __func__, rc);
+			ecode = 4;  // some error
+			break;
+		}
+
+		// create task
+		newid = L4_thrid_t::create_global(newno, 7/* ver ??? */);
+		L4_fpage_t rem_utcbs = L4_fpage_t::create(mr[1]);
+		unsigned prio = mr[2];
+		L4_thrid_t inc_pager(mr[3]);
+		L4_fpage_t kip_area = L4_fpage_t::create(mr[4]);
 
 		// check prio
 		if (prio > max_prio)
@@ -1486,38 +1744,75 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			prio = max_prio;
 		}
 
-		// find local addres for rem_utcb
-		L4_fpage_t loc_utcb;
-		rc = wrm_app_location(from, rem_utcb, Cfg_page_sz, Acc_rw, &loc_utcb);
+		// find local address for rem_utcbs
+		L4_fpage_t loc_utcbs;
+		rc = wrm_app_location(from, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, &loc_utcbs);
+		assert(rem_utcbs.size() == loc_utcbs.size());
 		if (rc)
 		{
-			wrm_loge("wrm_app_location(utcb=0x%x, acc=%d) failed, rc=%d.\n", rem_utcb, Acc_rw, rc);
-			ecode = 4;  // bad utcb
+			wrm_loge("%s:  wrm_app_location(utcbs=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
+				__func__, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, rc);
+			ecode = 5;  // bad utcbs
 			break;
 		}
 
-		rc = wrm_thread_create_priv(newid, from, loc_utcb.addr(), entry, stack, stack_sz, prio, short_name);
+		// create application's thread/aspace via ThreadControl
+		L4_thrid_t alpha = l4_utcb()->global_id();
+		L4_thrid_t space = newid;  // =dest for aspace creation
+		L4_thrid_t sched = alpha;  // alpha to can set prio below via l4_schedule
+		L4_thrid_t pager = L4_thrid_t::Nil;
+		rc = l4_thread_control(newid, space, sched, pager, loc_utcbs.addr());
 		if (rc)
 		{
-			wrm_loge("Failed to create thread, rc=%d.\n", rc);
-			ecode = 5;  // some error
+			wrm_loge("%s:  l4_thread_control() - rc=%d.\n", __func__, rc);
+			ecode = 6;
 			break;
 		}
 
+		// set thread params via Schedule
+		rc = l4_schedule(newid, -1, -1, prio, -1);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_schedule() - rc=%d.\n", __func__, rc);
+			ecode = 7;
+			break;
+		}
+
+		// configure application's aspace via SpaceControl
+		word_t control = 0;
+		L4_thrid_t redirector = L4_thrid_t::Nil;
+		rc = l4_space_control(newid, control, kip_area, loc_utcbs, redirector);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_space_control() - rc=%d.\n", __func__, rc);
+			ecode = 8;
+			break;
+		}
+
+		// activate aplication's thread via ThreadControl
+		pager = inc_pager;
+		rc = l4_thread_control(newid, space, sched, pager, -1);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_thread_control() - rc=%d.\n", __func__, rc);
+			ecode = 9;  // bad utcb
+			break;
+		}
 	} while (0);
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(Wrm_ipc_create_thread);
-	utcb->msgtag().propagated(false);
-	utcb->msgtag().untyped(2);
-	utcb->msgtag().typed(0);
+	tag.ipc_label(Wrm_ipc_create_task);
+	tag.propagated(false);
+	tag.untyped(2);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = newid.raw();
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
+		wrm_loge("%s:  l4_send(map) - rc=%u.\n", __func__, rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
 }
@@ -1580,7 +1875,8 @@ void process_get_thread_id_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		int rc = Named_threads_t::get_id(name, &id, &key0, &key1);
 		if (rc)
 		{
-			wrm_loge("Failed to get thread id, rc=%d.\n", rc);
+			wrm_loge("%s:  failed to get thread id, name=%.*s, rc=%d.\n",
+				__func__, Named_thread_t::Name_len_max, name, rc);
 			ecode = 1;  // no app
 			break;
 		}
@@ -1606,12 +1902,12 @@ void process_get_thread_id_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	}
 }
 
-// get range of thread IDs for task specefied by thread ID
+// get range of thread IDs for app specefied by thread ID
 void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
 	assert(tag.untyped() == 1);
 	assert(tag.typed() == 0);
-	/**/wrm_logi("thrnums:  from=0x%x/%u.\n", from.raw(), from.number());
+	/**/wrm_logi("thrnums:  from=0x%lx/%u.\n", from.raw(), from.number());
 
 	L4_thrid_t app_id = mr[1];
 	unsigned thrno_begin = 0;
@@ -1621,10 +1917,11 @@ void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	utcb->msgtag().ipc_label(Wrm_ipc_app_threads);
-	utcb->msgtag().propagated(false);
-	utcb->msgtag().untyped(3);
-	utcb->msgtag().typed(0);
+	tag.ipc_label(Wrm_ipc_app_threads);
+	tag.propagated(false);
+	tag.untyped(3);
+	tag.typed(0);
+	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = thrno_begin;
 	utcb->mr[3] = thrno_end;
@@ -1634,7 +1931,6 @@ void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
-
 }
 //--------------------------------------------------------------------------------------------------
 //  ~Requests handlers
@@ -1678,24 +1974,28 @@ int main()
 	{
 		L4_thrid_t from = L4_thrid_t::Nil;
 		//wrm_logi("wait ipc.\n");
-		int rc = l4_receive(L4_thrid_t::Any, L4_time_t::Never, from); // wait msg
+		int rc = l4_receive(L4_thrid_t::Any, L4_time_t::Never, &from);
 		L4_utcb_t* utcb = l4_utcb();
 		L4_msgtag_t tag = utcb->msgtag();
-		word_t mr[64];
+		word_t mr[L4_utcb_t::Mr_words];
 		memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
-		//wrm_logi("received IPC msg, rc=%d.\n", rc);
+		//wrm_logi("rx:  rc=%d.\n", rc);
 		if (rc)
 		{
-			wrm_loge("received IPC msg, rc=%d.\n", rc);
+			wrm_loge("rx:  rc=%d.\n", rc);
 			continue;
 		}
 
-		//wrm_logi("received IPC:  from=0x%x/%u, tag=0x%x.\n", from.raw(), from.number(), tag.raw());
+		//wrm_logi("rx:  from=0x%x/%u, tag=0x%x.\n", from.raw(), from.number(), tag.raw());
 
 		if (tag.proto_label() == L4_msgtag_t::Pagefault)
 		{
 			process_pfault(tag, mr, from);
+		}
+		else if (tag.is_exc_request())
+		{
+			process_exception(tag, mr, from);
 		}
 		else
 		{
@@ -1707,10 +2007,12 @@ int main()
 				case Wrm_ipc_get_usual_mem:    process_usual_memory_request(tag, mr, from);    break;
 				case Wrm_ipc_get_named_mem:    process_named_memory_request(tag, mr, from);    break;
 				case Wrm_ipc_create_thread:    process_create_thread_request(tag, mr, from);   break;
+				case Wrm_ipc_create_task:      process_create_task_request(tag, mr, from);     break;
 				case Wrm_ipc_register_thread:  process_register_thread_request(tag, mr, from); break;
 				case Wrm_ipc_get_thread_id:    process_get_thread_id_request(tag, mr, from);   break;
 				case Wrm_ipc_app_threads:      process_app_threads_request(tag, mr, from);     break;
 				default:
+					wrm_loge("rx:  from=%u, label=%ld, u=%u, t=%u.\n", from.number(), tag.ipc_label(), tag.untyped(), tag.typed());
 					l4_kdb("Alpha received unexpected msg - IMPLEMENT ME");
 			}
 		}

@@ -19,7 +19,7 @@ app_entry:
 	 nop
 
 //.section .bss
-.section .stack, "aw"  // FIXME
+.section .stack,"aw",@nobits  // FIXME
 .align 8
-.space 0x8000
+.space 0x1000
 app_stack:

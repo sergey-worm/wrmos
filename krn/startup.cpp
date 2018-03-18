@@ -116,12 +116,12 @@ void kthread()
 
 	// create sigma0 thread
 	L4_thrid_t nil = L4_thrid_t::Nil;
-	Thread_t& thr = Threads_t::create(thrid_sigma0(), nil, nil, &tsk, Thread_t::Prio_max, "sgm0");
-	thr.utcb_location(utcb_pa);
-	thr.activate();
-	thr.start(kip->sigma0_ip, kip->sigma0_sp);
+	Thread_t* thr = Threads_t::create(thrid_sigma0(), nil, nil, &tsk, Thread_t::Prio_max, "sgm0");
+	thr->utcb_location(utcb_pa);
+	thr->activate();
+	thr->start(kip->sigma0_ip, kip->sigma0_sp);
 	Sched_t::current()->name("idle"); // rename thread from 'krnl' to 'idle'
-	Sched_t::switch_to(&thr);         // go to sigma0
+	Sched_t::switch_to(thr);          // go to sigma0
 
 	void idle_loop();
 	idle_loop();
@@ -143,14 +143,16 @@ void init_kip()
 	L4_kip_t* kip = get_kip();
 
 	if (kip->magic != L4_kip_magic)
-		panic("%s:  wrong kip:  addr=0x%lx, magic=0x%x/%.4s.",
+		panic("%s:  wrong kip:  addr=0x%p, magic=0x%lx/%.4s.",
 			__func__, kip, kip->magic, (char*)&kip->magic);
 
 	kip->thread_info.system_base(Kcfg::Kip_thrid_system_base);
 	kip->thread_info.user_base(Kcfg::Kip_thrid_user_base);
 	kip->thread_info.bits_max(Kcfg::Thr_num_width);
-	printk("sys_base=%u, usr_base=%u, num_max=%u.\n",
+	printk("sys_base=%lu, usr_base=%lu, num_max=%lu.\n",
 		kip->thread_info.system_base(), kip->thread_info.user_base(), kip->thread_info.number_max());
+
+	kip->tick_usec = Cfg_krn_tick_usec;
 }
 
 // some debug checkings
@@ -205,7 +207,7 @@ void startup()
 	arch_set_timer_va(ktimer_va() + get_pg_offset(Cfg_krn_timer_paddr));
 
 	// init log sybsystem
-	size_t log_sz = 8 * Cfg_page_sz;
+	size_t log_sz = 16 * Cfg_page_sz;
 	addr_t log_buf = Kmem::alloc(log_sz);
 	assert(log_buf);
 	Log::init((char*)log_buf, log_sz);
@@ -224,6 +226,9 @@ void startup()
 
 	// initialize KIP data
 	init_kip();
+
+	// alloc thread kernel stacks
+	Threads_t::alloc_kstack();
 
 	// run kernel thread
 	Threads_t::create_kthread_and_go((void*)kthread, &tsk, "krnl");

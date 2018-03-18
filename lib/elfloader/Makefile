@@ -12,7 +12,6 @@ baseflags += -O2 -Wall -Werror
 cxxflags  +=
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG

@@ -5,8 +5,8 @@
 //##################################################################################################
 
 #include "arch.h"
-#include "stack.h"
-#include "processor.h"
+#include "sys_stack.h"
+#include "sys_proc.h"
 
 void arch_init()
 {
@@ -37,10 +37,27 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 	//        at the start.
 	//        Do not use any C-code here to preserve adding epilogue by compiler!
 
+	// clean inc regs
+	asm volatile
+	(
+		"mov %g0, %i0       \n"
+		"mov %g0, %i1       \n"
+		"mov %g0, %i2       \n"
+		"mov %g0, %i3       \n"
+		"mov %g0, %i4       \n"
+		"mov %g0, %i5       \n"
+		"mov %g0, %i6       \n"
+		"mov %g0, %i7       \n"
+	);
+
 	// load UTCB address from top of the stack to %g7
 	asm volatile
 	(
 		"ld  [ %sp ], %g7   \n" // get UTCB address
+		#if 1
+		"set 0xff000000, %l0\n"
+		"st %g7, [%l0]      \n "
+		#endif
 		"add %sp, 4, %sp    \n" // correct sp after pop start address
 	);
 
@@ -67,12 +84,11 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 	psr &= ~(0x1 << 7);         // user mode
 	psr &= ~(1 << 12);          // disable fpu, enabling my be inside fp_disabled trap
 
-	Proc::psr_fast(psr);        // after we have 3 delay instructions
+	Proc::psr(psr);             // switch to user mode
 
 	// set sp and go to thread's start
 	asm volatile
 	(
-		"nop             \n"    // fill first delay slot
 		"jmp %o7         \n"    // go to thread entry point
 		" mov %o5, %sp   \n"    // set initial stack
 	);
@@ -80,7 +96,12 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 
 void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 {
+	#if 0
 	(void) nxt_utcb;  // unused for sparc, utcb always lay in g7
+	#else
+	// set utcb
+	*((word_t*)0xff000000) = nxt_utcb;
+	#endif
 
 	// store all dirty regwins including current
 	Proc::flush_regwins();
@@ -93,6 +114,18 @@ void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 		"std   %o2, [%sp +  8]   \n"
 		"std   %o4, [%sp + 16]   \n"
 		"st    %o7, [%sp + 24]   \n"
+	);
+
+	// store g-registers, use o4 as scratch
+	asm volatile
+	(
+		"sub   %sp, 32, %sp    \n"
+		"rd  %y, %o4           \n"
+		"st  %o4, [%sp +  0]   \n"
+		"st  %g1, [%sp +  4]   \n"
+		"std %g2, [%sp +  8]   \n"
+		"std %g4, [%sp + 16]   \n"
+		"std %g6, [%sp + 24]   \n"
 	);
 
 	// store return address
@@ -119,6 +152,18 @@ void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 
 	// next thread restarts from here
 	asm volatile ("1:");
+
+	// restore g-registers, use o4 as scratch
+	asm volatile
+	(
+		"ld  [%sp +  0], %o4     \n"
+		"ld  [%sp +  4], %g1     \n"
+		"ldd [%sp +  8], %g2     \n"
+		"ldd [%sp + 16], %g4     \n"
+		"ldd [%sp + 24], %g6     \n"
+		"wr  %o4, %y             \n"
+		"add  %sp, 32, %sp       \n"
+	);
 
 	// restore o-registers (but o6/sp)
 	asm volatile

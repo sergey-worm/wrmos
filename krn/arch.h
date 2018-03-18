@@ -7,7 +7,7 @@
 #ifndef ARCH_H
 #define ARCH_H
 
-#include "types.h"
+#include "sys_types.h"
 
 void arch_init();
 void arch_set_timer_va(long va);

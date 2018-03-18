@@ -6,9 +6,9 @@
 
 #include "list.h"
 #include "wrm_mpool.h"
+#include "wrm_mtx.h"
 #include "wrm_log.h"
-
-//#include "hwbp.h"
+#include <assert.h>
 
 class Memory_pool_t
 {
@@ -54,6 +54,7 @@ private:
 
 	size_t log2sz(size_t sz_bytes)
 	{
+		//wrm_logd("%s:  sz_bytes=0x%x.\n", __func__, sz_bytes);
 		size_t log2sz = 0;
 		word_t bytes = sz_bytes;
 		while (!(bytes & 0x1))
@@ -63,9 +64,11 @@ private:
 		}
 
 		// checking
+		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u, before checking.\n", __func__, sz_bytes, log2sz);
 		if ((size_t)(1<<log2sz) != sz_bytes)
 			return 0;
 
+		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u.\n", __func__, sz_bytes, log2sz);
 		return log2sz;
 	}
 
@@ -77,14 +80,14 @@ public:
 
 	void dump()
 	{
-		wrm_logd("Dump memory pool (%#x bytes):\n", _pool_sz_bytes);
+		wrm_logd("Dump memory pool (%#zx bytes):\n", _pool_sz_bytes);
 		for (unsigned i=0; i<Sizes_num; ++i)
 		{
 			fpages_t& pgs = _fpages[i];
 			if (pgs.empty())
 				continue;
 			for (fpages_t::citer_t it=pgs.cbegin(); it!=pgs.cend(); ++it)
-				wrm_logd("    addr=%#8x, size=%#8x/%u, acc=%d\n",
+				wrm_logd("    addr=%#8lx, size=%#8lx/%u, acc=%d\n",
 					it->addr(), it->size(), it->log2sz(), it->access());
 		}
 	}
@@ -102,13 +105,13 @@ public:
 		//wrm_logd("%s:  log2sz=%u, pool_sz=0x%x (&pool_sz=0x%x).\n", __func__, log2sz, _pool_sz_bytes, &_pool_sz_bytes);
 		if (log2sz < Log2sz_min  ||  log2sz > Log2sz_max)
 		{
-			wrm_loge("wrong log2sz=%u.\n", log2sz);
+			wrm_loge("wrong log2sz=%zu.\n", log2sz);
 			return L4_fpage_t::create_nil();
 		}
 
-		if (_pool_sz_bytes < (unsigned)(1<<log2sz))
+		if (_pool_sz_bytes < (size_t)(1<<log2sz))
 		{
-			wrm_logw("no mem:  pool_sz=0x%x, require=0x%x.\n", _pool_sz_bytes, 1<<log2sz);
+			wrm_logw("no mem:  pool_sz=0x%zx, require=0x%x.\n", _pool_sz_bytes, 1<<log2sz);
 			return L4_fpage_t::create_nil();
 		}
 
@@ -131,7 +134,7 @@ public:
 
 	L4_fpage_t alloc(size_t sz)
 	{
-		//wrm_logd("%s:  sz=0x%x, pool_sz=0x%x.\n", __func__, sz, _pool_sz_bytes);
+		//wrm_logd("%s:  sz=0x%zx, pool_sz=0x%zx.\n", __func__, sz, _pool_sz_bytes);
 		L4_fpage_t res = alloc_log2sz(log2sz(sz));
 		return res;
 	}
@@ -167,3 +170,54 @@ extern "C" size_t wrm_mpool_size()
 	return Memory_pool_t::inst().size();
 }
 
+// TODO:  try to use wrm_mpool_alloc() allocator
+extern "C" void* wrm_malloc(size_t sz)
+{
+	// FIXME:  do separate initialize functon, now may be raice condition
+	static Wrm_mtx_t mtx;
+	static int first = 1;
+	if (first)
+	{
+		first = 0;
+		int rc = wrm_mtx_init(&mtx);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_mtx_init() - rc=%d.\n", __func__, rc);
+			return 0;
+		}
+	}
+
+	sz = round_up(sz, 8);
+
+	enum { Sz = 256*1024 };
+	static char pool[Sz] __attribute__((aligned(8)));
+	static size_t free_sz = Sz;
+	static size_t free_pos = 0;
+
+	int rc = wrm_mtx_lock(&mtx);
+	if (rc)
+	{
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return 0;
+	}
+
+	assert(sz <= free_sz);
+
+	if (sz > free_sz)
+		return 0;
+
+	void* res = &pool[free_pos];
+	free_sz  -= sz;
+	free_pos += sz;
+
+	//wrm_logd("%s:  size=%4u, ok, free=%u.\n", __func__, sz, free_sz);
+
+	rc = wrm_mtx_unlock(&mtx);
+	if (rc)
+	{
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+		return 0;
+	}
+
+	return res;
+}

@@ -10,7 +10,7 @@
 
 extern "C" void arm_entry_undef(addr_t spsr, addr_t inst)
 {
-	force_printk("undef_trap:  spsr=0x%x, inst=0x%x.\n", spsr, inst);
+	force_printk("undef_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
 	while (1);
 }
 
@@ -24,7 +24,7 @@ extern "C" void arm_entry_iabort(addr_t spsr, addr_t inst)
 	addr_t inst_fault_status = 0;
 	asm volatile ("mrc  p15, 0, %0, c5, c0, 1" : "=r"(inst_fault_status)); // IFSR
 
-	force_printk("iabort_trap:  spsr=0x%x, inst=0x%x, fault_addr=0x%x, fault_status=0x%x.\n",
+	force_printk("iabort_trap:  spsr=0x%lx, inst=0x%lx, fault_addr=0x%lx, fault_status=0x%lx.\n",
 		spsr, inst, inst_fault_addr, inst_fault_status);
 
 	bool krn_mode = (spsr & 0x1f) != 0x10;
@@ -36,7 +36,7 @@ extern "C" void arm_entry_iabort(addr_t spsr, addr_t inst)
 
 	//Sched_t::current()->entry_frame()->dump();
 
-	printk("user:  sp=0x%x, lr=0x%x.\n", Proc::usp(), Proc::ulr());
+	printk("user:  sp=0x%lx, lr=0x%lx.\n", Proc::usp(), Proc::ulr());
 
 	kentry_pagefault(inst_fault_addr, Acc_x, inst);
 
@@ -53,7 +53,7 @@ extern "C" void arm_entry_dabort(addr_t spsr, addr_t inst)
 	addr_t data_fault_status = 0;
 	asm volatile ("mrc  p15, 0, %0, c5, c0, 0" : "=r"(data_fault_status)); // DFSR
 
-	force_printk("dabort_trap:  spsr=0x%x, inst=0x%x, fault_addr=0x%x, fault_status=0x%x.\n",
+	force_printk("dabort_trap:  spsr=0x%lx, inst=0x%lx, fault_addr=0x%lx, fault_status=0x%lx.\n",
 		spsr, inst, data_fault_addr, data_fault_status);
 
 	bool krn_mode = (spsr & 0x1f) != 0x10; //Proc::psr() & (1<<6); // psr.ps
@@ -65,7 +65,7 @@ extern "C" void arm_entry_dabort(addr_t spsr, addr_t inst)
 
 	//Sched_t::current()->entry_frame()->dump();
 
-	printk("user:  sp=0x%x, lr=0x%x.\n", Proc::usp(), Proc::ulr());
+	printk("user:  sp=0x%lx, lr=0x%lx.\n", Proc::usp(), Proc::ulr());
 
 	int access = (data_fault_status >> 11) & 1  ? Acc_w : Acc_r;
 
@@ -76,7 +76,7 @@ extern "C" void arm_entry_dabort(addr_t spsr, addr_t inst)
 
 extern "C" void arm_entry_reset(addr_t spsr, addr_t inst)
 {
-	force_printk("reset_trap:  spsr=0x%x, inst=0x%x.\n", spsr, inst);
+	force_printk("reset_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
 	while (1);
 }
 
@@ -105,7 +105,7 @@ extern "C" void arm_entry_fiq(addr_t spsr, addr_t inst)
 {
 	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__));
 
-	printf("fiq_trap:  spsr=0x%x, inst=0x%x.\n", spsr, inst);
+	printf("fiq_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
 	Intc::dump(dprint1);
 	while (1);
 

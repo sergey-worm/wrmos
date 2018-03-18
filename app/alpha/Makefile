@@ -13,7 +13,7 @@ blddir     ?= build
 target     ?= alpha.elf
 objs       := $(arch)/crt0.o main.o
 incflags   := -I$(cfgdir)
-incflags   += -I../../lib/l4
+incflags   += -I../../lib/l4/inc
 incflags   += -I../../lib/sys
 incflags   += -I../../lib/sys/$(arch)
 incflags   += -I../../lib/list
@@ -35,7 +35,6 @@ libs       += $(blddir)/../../lib/elfloader/libelfloader.a
 use_libgcc := 1 # for snprintf in libwlibc.a
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG

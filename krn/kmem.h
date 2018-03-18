@@ -8,13 +8,14 @@
 #define KMEM_H
 
 #include "krn-config.h"
-#include "types.h"
+#include "sys_types.h"
+#include "sys_utils.h"
 #include <stdarg.h>
-#include "panic.h"
+#include "wlibc_panic.h"
 #include "ptable.h"
-#include "sys-utils.h"
 #include "kconfig.h"
 #include "list.h"
+#include "wlibc_assert.h"
 
 /*
 static unsigned dprint_list(const char* fmt, ...)
@@ -83,11 +84,11 @@ private:
 	// split or combine regions if need
 	void add(iter_t pos, Addr addr, Size sz, const Type& type, Mode mode)
 	{
-		assert((pos == dlist.end()     ||  addr + sz <= pos->addr)  &&  "cross next region");
-		assert((pos == dlist.begin()                                  ||  // pos is first  --> no prev
-		        dlist.empty()                                         ||  // list is empty --> no prev
-		        (pos == dlist.end()  &&  addr >= dlist.back().end())  ||  // !empty && pos==end() && back-doesn't-cross
-		        (pos != dlist.end()  &&  addr >= (pos-1)->end())) &&      // !empty && pos!=end() && prev-doesn't-cross
+		wassert((pos == dlist.end()     ||  addr + sz <= pos->addr)  &&  "cross next region");
+		wassert((pos == dlist.begin()                                ||  // pos is first  --> no prev
+		        dlist.empty()                                        ||  // list is empty --> no prev
+		        (pos == dlist.end()  &&  addr >= dlist.back().end()) ||  // !empty && pos==end() && back-doesn't-cross
+		        (pos != dlist.end()  &&  addr >= (pos-1)->end())) &&     // !empty && pos!=end() && prev-doesn't-cross
 		       "cross prev region");
 
 		if (mode == NotCombine) // just insert
@@ -139,8 +140,8 @@ private:
 	// return the next element
 	iter_t remove(iter_t pos, Addr addr, Size sz)
 	{
-		assert(pos != dlist.end());
-		assert((pos->addr <= addr)  &&  (pos->addr + pos->sz >= addr + sz)  &&  "out of region");
+		wassert(pos != dlist.end());
+		wassert((pos->addr <= addr)  &&  (pos->addr + pos->sz >= addr + sz)  &&  "out of region");
 
 		iter_t ret = pos;
 		Addr eend = addr + sz;  // eend cause end() is busy =)
@@ -245,7 +246,7 @@ public:
 		if (cur  &&  ((cur + sz) > space_end))
 			cur = 0; // not found
 
-		//assert(cur && "could not find free region");
+		//wassert(cur && "could not find free region");
 
 		return cur;
 	}
@@ -301,7 +302,6 @@ public:
 	void free(Addr addr, Size sz)
 	{
 		iter_t it = find(addr, sz);
-		assert(it != dlist.end());
 		if (it != dlist.end())
 			remove(it, addr, sz);
 	}
@@ -317,9 +317,9 @@ public:
 	// split or combine regions if need
 	void set_type(iter_t pos, Addr addr, Size sz, const Type& type, Mode mode)
 	{
-		assert(pos != dlist.end());
-		assert((pos->addr <= addr)  &&  (pos->addr + pos->sz >= addr + sz));
-		assert(pos->type != type);
+		wassert(pos != dlist.end());
+		wassert((pos->addr <= addr)  &&  (pos->addr + pos->sz >= addr + sz));
+		wassert(pos->type != type);
 
 		// NOTE:  may to optimize to preserve add/del new item
 		/*
@@ -337,7 +337,7 @@ public:
 	}
 };
 
-#include "l4types.h"
+#include "l4_types.h"
 #include "acc2mmuacc.h"
 
 //--------------------------------------------------------------------------------------------------
@@ -374,12 +374,14 @@ public:
 
 private:
 
-	typedef Address_space_t <addr_t, size_t, Type, 128> aspace_t;
+	typedef Address_space_t <addr_t, size_t, Type, 512> aspace_t;
 	typedef Region <addr_t, size_t> vregion_t;
 	struct ranges_t
 	{
 		vregion_t kmem;              // kernel mem space, map phys:0xf0000000
 		vregion_t kutcbs;            // kernel aspace for utcbs
+		vregion_t kstacks;           // kernel aspace for kstacks
+		vregion_t kheap;             // kernel aspace for heap
 		vregion_t kio;               // kernel io space
 		vregion_t usr;               // user space (mem and io)
 	};
@@ -429,6 +431,8 @@ private:
 		extern int _rodata_end;
 		extern int _data_start;
 		extern int _data_end;
+		extern int _bss_start;
+		extern int _bss_end;
 
 		// virt regions
 		addr_t va_kip    = (addr_t)&_kip_start;
@@ -441,12 +445,15 @@ private:
 		size_t sz_rodata = (addr_t)&_rodata_end - (addr_t)&_rodata_start;
 		addr_t va_data   = (addr_t)&_data_start;
 		size_t sz_data   = (addr_t)&_data_end - (addr_t)&_data_start;
+		addr_t va_bss    = (addr_t)&_bss_start;
+		size_t sz_bss    = (addr_t)&_bss_end - (addr_t)&_bss_start;
 
 		sz_kip    = round_pg_up(sz_kip);
 		sz_text   = round_pg_up(sz_text);
 		sz_utext  = round_pg_up(sz_utext);
 		sz_rodata = round_pg_up(sz_rodata);
 		sz_data   = round_pg_up(sz_data);
+		sz_bss    = round_pg_up(sz_bss);
 
 		// map kernel memory
 		kmap(va_kip,    kmem_paddr(va_kip,    sz_kip),    sz_kip,    Acc_kkip);
@@ -454,6 +461,7 @@ private:
 		kmap(va_utext,  kmem_paddr(va_utext,  sz_utext),  sz_utext,  Acc_kutext);
 		kmap(va_rodata, kmem_paddr(va_rodata, sz_rodata), sz_rodata, Acc_krodata);
 		kmap(va_data,   kmem_paddr(va_data,   sz_data),   sz_data,   Acc_kdata);
+		kmap(va_bss,    kmem_paddr(va_bss,    sz_bss),    sz_bss,    Acc_kdata);
 
 		// map kernel io space
 		// if lowest byte 1 - don't map
@@ -478,22 +486,28 @@ public:
 		enum
 		{
 			Guard = Cfg_page_sz,  // guard page between regions
+			Kstack_max = 2 * Cfg_page_sz,
 
-			Usr_va  = 0x10000000,                         // all vspace from 0x10000000 till Cfg_krn_vaddr
-			Usr_sz  = Cfg_krn_vaddr - Usr_va - Guard,     //
-			Kmem_va = Cfg_krn_vaddr,                      //
-			Kmem_sz = 0x200000,                           // 2 MB, may be bigger if need
-			Kio_va  = Kmem_va + Kmem_sz + Guard,          //
-			Kio_sz  = Kio_uart_pg_sz + Kio_intc_pg_sz + Kio_timer_pg_sz + 2 * Guard,
-			Kutcbs_va = Kio_va + Kio_sz + Guard,          //
-			Kutcbs_sz = Kcfg::Threads_max * Cfg_page_sz   //
+			Usr_va     = 0x10000000,                         // all vspace from 0x10000000 till Cfg_krn_vaddr
+			Usr_sz     = Cfg_krn_vaddr - Usr_va - Guard,     //
+			Kmem_va    = Cfg_krn_vaddr,                      //
+			Kmem_sz    = 0x400000,                           // 4 MB, may be bigger if need
+			Kio_va     = Kmem_va + Kmem_sz + Guard,          //
+			Kio_sz     = Kio_uart_pg_sz + Kio_intc_pg_sz + Kio_timer_pg_sz + 2*Guard,
+			Kutcbs_va  = Kio_va + Kio_sz + Guard,            // area to map utcb in kernel space
+			Kutcbs_sz  = Kcfg::Threads_max * Cfg_page_sz,    //
+			Kstacks_va = Kutcbs_va + Kutcbs_sz + Guard,      // kernel stacks area
+			Kstacks_sz = Kcfg::Threads_max * (Kstack_max + Guard),  //
+			Kheap_va   = Kstacks_va + Kstacks_sz + Guard,    // kernel heap area
+			Kheap_sz   = 0x100000                            //
 		};
 
-		
 		_ranges.usr.set(Usr_va, Usr_sz, "usr");
 		_ranges.kmem.set(Kmem_va, Kmem_sz, "kmem");
 		_ranges.kio.set(Kio_va, Kio_sz, "kio");
 		_ranges.kutcbs.set(Kutcbs_va, Kutcbs_sz, "kutcbs");
+		_ranges.kstacks.set(Kstacks_va, Kstacks_sz, "kstacks");
+		_ranges.kheap.set(Kheap_va, Kheap_sz, "kheap");
 
 		setup_kdiff();
 		Pgtab::kinit();
@@ -506,7 +520,7 @@ public:
 
 	static paddr_t kmem_paddr(addr_t va, size_t sz)
 	{
-		assert(_ranges.kmem.inside(va, sz));
+		wassert(_ranges.kmem.inside(va, sz));
 		(void)sz;
 		return va - _diff_kva_kpa;
 	}
@@ -516,7 +530,7 @@ public:
 	static addr_t kmem_vaddr(paddr_t pa, size_t sz)
 	{
 		addr_t va = pa + _diff_kva_kpa;
-		assert(_ranges.kmem.inside(va, sz));
+		wassert(_ranges.kmem.inside(va, sz));
 		(void)sz;
 		return va;
 	}
@@ -524,21 +538,21 @@ public:
 	static void kdump()
 	{
 		printk("Dump kernel vspace:\n");
-		printk("  kernel (%u/%u):\n", _kspace.size(), _kspace.capacity());
+		printk("  kernel (%zu/%zu):\n", _kspace.size(), _kspace.capacity());
 		for (aspace_t::citer_t it=_kspace.cbegin(); it!=_kspace.cend(); ++it)
-			printk("  [%08x - %08x)  sz=0x%08x,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
+			printk("  [%08lx - %08lx)  sz=0x%08zx,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
 	}
 
 	void dump()
 	{
 		printk("Dump vspace, id=%u:\n", _id);
-		printk("  kernel (%u/%u):\n", _kspace.size(), _kspace.capacity());
+		printk("  kernel (%zu/%zu):\n", _kspace.size(), _kspace.capacity());
 		for (aspace_t::citer_t it=_kspace.cbegin(); it!=_kspace.cend(); ++it)
-			printk("  [%08x - %08x)  sz=0x%08x,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
+			printk("  [%08lx - %08lx)  sz=0x%08zx,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
 
-		printk("  user (%u/%u):\n", _uspace.size(), _uspace.capacity());
+		printk("  user (%zu/%zu):\n", _uspace.size(), _uspace.capacity());
 		for (aspace_t::citer_t it=_uspace.cbegin(); it!=_uspace.cend(); ++it)
-			printk("  [%08x - %08x)  sz=0x%08x,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
+			printk("  [%08lx - %08lx)  sz=0x%08zx,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
 
 		_pgtab.dump();
 	}
@@ -595,13 +609,14 @@ private:
 	static void kmap(addr_t va, paddr_t pa, size_t sz, kacc_t acc, unsigned cachable = Cachable)
 	{
 		Type type(acc, cachable==Cachable);
-		printk("Aspace::%s:  va=0x%08lx, pa=0x%08llx, sz=0x%08lx, acc=%s.\n", __func__, va, pa, sz, type.str());
-		assert(is_aligned(va, Cfg_page_sz));
-		assert(is_aligned(pa, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(va);
-		assert(pa);
-		assert(sz);
+		printk("Aspace::%s:  va=0x%08lx, pa=0x%08llx, sz=0x%08zx, acc=%s.\n", __func__,
+			va, (long long)pa, sz, type.str());
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(pa, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(va);
+		wassert(pa);
+		wassert(sz);
 
 		// TODO:  check that region is Kernel
 
@@ -609,13 +624,15 @@ private:
 		Pgtab::kmap(va, pa, sz, acc2mmuacc(acc), cachable);
 	}
 
+public:
+
 	static void kunmap(addr_t va, size_t sz)
 	{
-		printk("Aspace::%s:  va=0x%08lx, sz=0x%08x.\n", __func__, va, sz);
-		assert(is_aligned(va, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(va);
-		assert(sz);
+		printk("Aspace::%s:  va=0x%08lx, sz=0x%08zx.\n", __func__, va, sz);
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(va);
+		wassert(sz);
 
 		// TODO:  check that region is Kernel
 
@@ -627,57 +644,117 @@ public:
 
 	static addr_t kmap_utcb(paddr_t pa)
 	{
-		printk("Aspace::%s:  pa=0x%llx.\n", __func__, pa);
-		assert(is_aligned(pa, Cfg_page_sz));
-		assert(pa);
+		printk("Aspace::%s:  pa=0x%llx.\n", __func__, (long long)pa);
+		wassert(is_aligned(pa, Cfg_page_sz));
+		wassert(pa);
 
 		addr_t kva = _kspace.alloc(Cfg_page_sz, Cfg_page_sz, Type(Acc_kutcb, Cachable), aspace_t::NotCombine,
 		                           _ranges.kutcbs.start, _ranges.kutcbs.sz);
 		if (!kva)
 			kdump();
-		assert(kva && "no kernel memory");
-		printk("Aspace::%s:  pa=0x%x --> kutcb=%x.\n", __func__, (int)pa, kva);
+		wassert(kva && "no kernel memory");
+		printk("Aspace::%s:  pa=0x%llx --> kutcb=%lx.\n", __func__, (long long)pa, kva);
 		if (kva)
 			Pgtab::kmap(kva, pa, Cfg_page_sz, acc2mmuacc(Acc_kutcb), Cachable);
 		return kva;
 	}
 
+	static addr_t kmap_kstack(paddr_t pa, size_t sz)
+	{
+		printk("Aspace::%s:  pa=0x%llx, sz=0x%zx.\n", __func__, (long long)pa, sz);
+		wassert(is_aligned(pa, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(sz <= 0x2000); // FIXME
+		wassert(sz);
+		wassert(pa);
+
+		printk("Aspace::%s:  region:  0x%lx .. 0x%lx.\n", __func__,
+			_ranges.kstacks.start, _ranges.kstacks.start + _ranges.kstacks.sz);
+
+		addr_t kva = _kspace.alloc(sz + 0x1000/*Guard FIXME*/, Cfg_page_sz, Type(Acc_kdata, Cachable), aspace_t::NotCombine,
+		                           _ranges.kstacks.start, _ranges.kstacks.sz);
+		if (!kva)
+			kdump();
+		wassert(kva && "no kernel memory");
+		printk("Aspace::%s:  pa=0x%llx --> kstack=%lx.\n", __func__, (long long)pa, kva);
+		if (kva)
+			Pgtab::kmap(kva, pa, Cfg_page_sz, acc2mmuacc(Acc_kdata), Cachable);
+		return kva;
+	}
+
+	static addr_t alloc_kspace(size_t sz)
+	{
+		printk("Aspace::%s:  sz=0x%zx.\n", __func__, sz);
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(sz);
+
+		printk("Aspace::%s:  region:  0x%lx .. 0x%lx.\n", __func__,
+			_ranges.kheap.start, _ranges.kheap.start + _ranges.kheap.sz);
+
+		addr_t va = _kspace.alloc(sz, Cfg_page_sz, Type(Acc_kdata, Cachable), aspace_t::NotCombine,
+		                          _ranges.kheap.start, _ranges.kheap.sz);
+		if (!va)
+			kdump();
+		wassert(va && "no kernel memory");
+		printk("Aspace::%s:  va=%lx.\n", __func__, va);
+		return va;
+	}
+
+	static void free_kspace(addr_t va, size_t sz)
+	{
+		printk("Aspace::%s:  va=0x%lx, sz=0x%zx.\n", __func__, va, sz);
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(va);
+		wassert(sz);
+
+		printk("Aspace::%s:  region:  0x%lx .. 0x%lx.\n", __func__,
+			_ranges.kheap.start, _ranges.kheap.start + _ranges.kheap.sz);
+
+		_kspace.free(va, sz);
+	}
+
 	addr_t find_free_uspace(size_t sz, size_t align)
 	{
-		printk("Aspace::%s:  sz=0x%x, align=0x%x.\n", __func__, sz, align);
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(is_aligned(align, Cfg_page_sz));
-		assert(sz);
-		assert(align);
+		printk("Aspace::%s:  sz=0x%zx, align=0x%zx.\n", __func__, sz, align);
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(is_aligned(align, Cfg_page_sz));
+		wassert(sz);
+		wassert(align);
 
 		addr_t uva = _uspace.find_free(sz, align, _ranges.usr.start, _ranges.usr.sz);
-		printk("Aspace::%s:  sz=0x%x, uva=0x%x.\n", __func__, sz, uva);
+		printk("Aspace::%s:  sz=0x%zx, uva=0x%lx.\n", __func__, sz, uva);
 		return uva;
 	}
 
 	void map(addr_t va, paddr_t pa, size_t sz, kacc_t acc, unsigned cachable = Cachable)
 	{
 		//printk("Aspace::%s:  id=%u:  va=%x, pa=%x, sz=0x%x, acc=%s.\n", __func__, _id, va, (int)pa, sz, Type(acc).str());
-		assert(is_aligned(va, Cfg_page_sz));
-		assert(is_aligned(pa, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(va);
-		assert(pa);
-		assert(sz);
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(pa, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(va);
+		wassert(pa);
+		wassert(sz);
 
 		// TODO:  check that region is User
+
+#ifdef Cfg_arch_sparc
+		if (acc == Acc_uw)
+			acc = Acc_urw;  // for sparc 'write' access always allows 'read' access
+#endif
 
 		Type type = _uspace.insert(va, sz, Type(acc, cachable == Cachable), aspace_t::Combine);
 		_pgtab.map(va, pa, sz, acc2mmuacc(type.acc), cachable);
 	}
 
+	// va may be 0
 	void unmap(addr_t va, size_t sz)
 	{
 		//printk("Aspace::%s:  id=%u:  va=%x, sz=0x%x.\n", __func__, _id, va, sz);
-		assert(is_aligned(va, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(va);
-		assert(sz);
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(sz);
 
 		// TODO:  check that region is User
 
@@ -688,10 +765,10 @@ public:
 	paddr_t walk(addr_t va, size_t sz)
 	{
 		//printk("Aspace::%s:  id=%u:  va=%x, sz=0x%x.\n", __func__, _id, va, sz);
-		assert(is_aligned(va, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(va);
-		assert(sz);
+		wassert(is_aligned(va, Cfg_page_sz));
+		wassert(is_aligned(sz, Cfg_page_sz));
+		wassert(va);
+		wassert(sz);
 
 		// TODO:  check that region is User
 
@@ -707,7 +784,7 @@ public:
 		// check access
 		if (fp.access() != (fp.access() & acc2uacc(it->type.acc)))
 		{
-			printk("req_acc=%u, reg_acc=%u.\n", fp.access(), acc2uacc(it->type.acc));
+			printk("ERR:  req_acc=%u, reg_acc=%u.\n", fp.access(), acc2uacc(it->type.acc));
 			return false;
 		}
 
@@ -723,7 +800,7 @@ public:
 		// check access
 		if (fp.access() != (fp.access() & acc2uacc(it->type.acc)))
 		{
-			printk("req_acc=%u, reg_acc=%u.\n", fp.access(), acc2uacc(it->type.acc));
+			printk("ERR:  req_acc=%u, reg_acc=%u.\n", fp.access(), acc2uacc(it->type.acc));
 			return -2;
 		}
 
@@ -774,7 +851,7 @@ public:
 				case Free:       return "free";
 				case Busy:       return "busy";
 			}
-			assert(0);
+			wassert(0);
 			return "__err__";
 		}
 	};
@@ -783,11 +860,11 @@ private:
 
 	enum
 	{
-		Alloc_min_sz = 0x40,             // minumum allocated mem chank
-		Pool_init_sz = 64 * Cfg_page_sz  // initial pool size
+		Alloc_min_sz = 0x40,              // minumum allocated mem chank
+		Pool_init_sz = 256 * Cfg_page_sz  // initial pool size
 	};
 
-	typedef Address_space_t <addr_t, size_t, Type, 128> memory_t;
+	typedef Address_space_t <addr_t, size_t, Type, 1024> memory_t;
 	static memory_t memory;                       // kernel memory pool
 	static uint8_t premapped_mem [Pool_init_sz];  // premapped memory
 	static size_t pool_sz;
@@ -799,8 +876,8 @@ private:
 		addr_t va = (addr_t)premapped_mem;
 		size_t sz = sizeof(premapped_mem);
 
-		assert(va && is_aligned(va, Cfg_page_sz));
-		assert(sz && is_aligned(sz, Cfg_page_sz));
+		wassert(va && is_aligned(va, Cfg_page_sz));
+		wassert(sz && is_aligned(sz, Cfg_page_sz));
 
 		memory.add(va, sz, Type(Type::Free), memory_t::NotCombine);
 	}
@@ -815,17 +892,17 @@ public:
 
 	static void dump()
 	{
-		printk("Dump kmemory pool (%u/%u), free=0x%x bytes:\n", memory.size(), memory.capacity(), pool_sz);
+		printk("Dump kmemory pool (%zu/%zu), free=0x%zx bytes:\n", memory.size(), memory.capacity(), pool_sz);
 		for (memory_t::citer_t it=memory.cbegin(); it!=memory.cend(); ++it)
-			printk("  [%08x - %08x)  sz=0x%08x,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
+			printk("  [%08lx - %08lx)  sz=0x%08zx,  %s.\n", it->addr, it->addr + it->sz, it->sz, it->type.str());
 	}
 
 	// allocate aligned memory chank
 	static addr_t alloc(size_t sz, addr_t align = Alloc_min_sz)
 	{
-		printk("Kmem::%s:  sz=0x%x, align=0x%x, pool_sz=0x%x.\n", __func__, sz, align, pool_sz);
+		printk("Kmem::%s:  sz=0x%zx, align=0x%lx, pool_sz=0x%zx.\n", __func__, sz, align, pool_sz);
 
-		assert(sz && align);
+		wassert(sz && align);
 
 		sz = round_up(sz, Alloc_min_sz);
 
@@ -854,10 +931,10 @@ public:
 	// free previously allocated memory
 	static void free(addr_t va)
 	{
-		printk("Kmem::%s:  va=%x.\n", __func__, va);
+		printk("Kmem::%s:  va=%lx.\n", __func__, va);
 
 		memory_t::iter_t it = memory.find(va);
-		assert(it != memory.end()  &&  it->type.type == Type::Busy);
+		wassert(it != memory.end()  &&  it->type.type == Type::Busy);
 		pool_sz += it->sz;
 		memory.set_type(it, va, it->sz, Type(Type::Free), memory_t::Combine);
 	}

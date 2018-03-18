@@ -7,7 +7,7 @@
 #ifndef WRM_SPINLOCK_H
 #define WRM_SPINLOCK_H
 
-#include "l4types.h"
+#include "l4_types.h"
 
 #ifdef __cplusplus
 extern "C" {

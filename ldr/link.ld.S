@@ -49,17 +49,11 @@ SECTIONS
 		*(.text)
 		*(.text.*)
 
+		. = ALIGN(8);
 		_ctors_start = .;
-		KEEP(*(.ctors))       /* sparc FIXME */
-		KEEP(*(.init_array))  /* arm   FIXME */
+		KEEP(*(.ctors))       /* sparc, x86 */
+		KEEP(*(.init_array))  /* arm */
 		_ctors_end = .;
-
-		/*
-		_dtors_start = .;
-		KEEP(*(.dtors))       sparc FIXME
-		KEEP(*(.fini_array))  arm   FIXME
-		_dtors_end = .;
-		*/
 
 		_text_end = .;
 	} > load
@@ -76,18 +70,16 @@ SECTIONS
 	{
 		_data_start = .;
 		*(.data)
+		*(.got)               /* .got need fo libgcc */
+		_data_end = .;
+	} > load
 
+	.bss :
+	{
 		_bss_start = .;
 		*(.bss)
 		*(.bss.*)
 		_bss_end = .;
-
-		/* .got need fo libgcc */
-		_got_start = .;
-		*(.got)
-		_got_end = .;
-
-		_data_end = .;
 	} > load
 
 	. = ALIGN(Cfg_page_sz);
@@ -95,6 +87,7 @@ SECTIONS
 
 	/DISCARD/ : {
 		*(.dtors)
+		*(.fini_array)
 		*(.note)
 		*(.note.ABI-tag)
 		*(.comment)

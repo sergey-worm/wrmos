@@ -5,9 +5,9 @@
 //##################################################################################################
 
 #include "wrm_ramfs.h"
-#include "ramfs.h" // lib/sys/ramfs.h
-#include "kip.h"
-#include "l4api.h"
+#include "sys_ramfs.h"
+#include "l4_kip.h"
+#include "l4_api.h"
 #include <string.h>
 
 struct Ramfs_t

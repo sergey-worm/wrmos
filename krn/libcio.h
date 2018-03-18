@@ -7,44 +7,63 @@
 #ifndef LIBCIO_H
 #define LIBCIO_H
 
-#include "libc_io.h"
+#include "wlibc_cb.h"
 #include "log.h"
 #include "kuart.h"
+
+void break_execution(const char* str);
 
 // after call this function printk()/printf() will be write to Uart
 inline void libcio_set_uart()
 {
-	Libc_io_callbacks_t io =
-	{
-		.out_char    = Uart::putch,
-		.out_string  = NULL,
-		.in_char     = Uart::getch,
-	};
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = Uart::putch;
+	cb->out_string = NULL;
+	cb->in_char    = Uart::getch;
+	cb->in_string  = NULL;
+	cb->break_exec = break_execution;
 }
 
 // after call this function printk()/printf() will be write to Log
 inline void libcio_set_log()
 {
-	Libc_io_callbacks_t io =
-	{
-		.out_char    = NULL,
-		.out_string  = Log::write,
-		.in_char     = NULL,
-	};
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = NULL;
+	cb->out_string = Log::write;
+	cb->in_char    = NULL;
+	cb->in_string  = NULL;
+	cb->break_exec = break_execution;
 }
 
 // after call this function printk()/printf() will be write to nothing
 inline void libcio_set_null()
 {
-	Libc_io_callbacks_t io =
-	{
-		.out_char    = NULL,
-		.out_string  = NULL,
-		.in_char     = NULL,
-	};
-	libc_init_io(&io); // init libc handlers
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = NULL;
+	cb->out_string = NULL;
+	cb->in_char    = NULL;
+	cb->in_string  = NULL;
+	cb->break_exec = break_execution;
+}
+
+inline void libcio_store(Wlibc_callbacks_t* cb_state)
+{
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb_state->out_char   = cb->out_char;
+	cb_state->out_string = cb->out_string;
+	cb_state->in_char    = cb->in_char;
+	cb->in_string        = NULL;
+	cb->break_exec       = break_execution;
+}
+
+inline void libcio_restore(const Wlibc_callbacks_t* cb_state)
+{
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	cb->out_char   = cb_state->out_char;
+	cb->out_string = cb_state->out_string;
+	cb->in_char    = cb_state->in_char;
+	cb->in_string  = NULL;
+	cb->break_exec = break_execution;
 }
 
 #endif // LIBCIO_H

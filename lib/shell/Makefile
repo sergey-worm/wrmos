@@ -9,6 +9,7 @@ target     ?= libshell.a
 objs       := shell.o
 incflags   := -I../list
 incflags   += -I../sys
+incflags   += -I../wlibc/inc
 baseflags  := -O2 -Wall -Werror
 cxxflags   := -std=c++11 -fno-rtti -fno-exceptions
 
@@ -17,7 +18,6 @@ ifeq ($(arch),x86_64)
 endif
 
 ifeq ($(dbg),1)
-  baseflags += -DCfg_debug
   baseflags += -DDEBUG
 else
   baseflags += -DNDEBUG
