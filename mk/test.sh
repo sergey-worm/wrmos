@@ -52,7 +52,7 @@ function do_build
 	prj=$2
 	arch=$3
 	brd=$4
-	make build  P=cfg/prj/${prj}-qemu-${brd}.prj B=$blddir/$prj-qemu-${brd} -j
+	time make build P=cfg/prj/${prj}-qemu-${brd}.prj B=$blddir/$prj-qemu-${brd} -j
 	rc=$?
 	echo "Build:  rc=$rc."
 	result[$id]=$(get_result $rc)

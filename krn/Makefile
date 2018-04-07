@@ -31,10 +31,6 @@ use_warns  += -Wno-unused-but-set-variable -Wno-unused-result
 use_warns  += -Wwrite-strings -Wdisabled-optimization -Wpointer-arith
 use_warns  += -Werror
 
-ifeq ($(arch),x86_64)
-  use_baseflags  += -mcmodel=kernel  # for link 64-bit kernel
-endif
-
 ifeq ($(dbg),1)
   use_baseflags += -g           # add GDB info
   use_baseflags += -DDEBUG
@@ -56,46 +52,39 @@ use_libs   += shell/libshell.a
 #  prepare params for base.bk  
 #------------------------------
 
-blddir     ?= build
-target     ?= kernel.elf
-objs       := $(arch)/crt0.o
-objs       += $(arch)/bootstrap.o
-objs       += $(arch)/arch.o
-objs       += $(arch)/entry.o
-objs       += thread.o
-objs       += threads.o
-objs       += singletons.o
-objs       += kip.o
-objs       += printk.o
-objs       += kentry.o
-objs       += syscalls.o
-objs       += ipc.o
-objs       += startup.o
-objs       += common.o
-incflags   := -I.
-incflags   += -I$(cfgdir)
-incflags   += -I$(arch)
-incflags   += -I../lib/sys/$(arch)
-incflags   += -I../lib/sys
-incflags   += -I../lib/list
-incflags   += -I../lib/l4/inc
-incflags   += -I../lib/wlibc/inc
-incflags   += -I../lib/shell
-incflags   += -I../lib/cbuf
-incflags   += -I../lib/uart/$(uart)
-incflags   += -I../lib/timer/$(timer)
-incflags   += -I../lib/intc/$(intc)
-incflags   += -I../lib/mmu/$(mmu)
-baseflags  += $(use_baseflags) $(use_warns)
-cxxflags   := -fno-rtti # to avoid undefined reference to `vtable ...'
-#cxxflags  += -std=c++11
-ldflags    := --fatal-warnings
-ldflags    += -zmax-page-size=0x1000
-libs       += $(addprefix $(blddir)/../lib/,$(use_libs))
-use_libgcc := 1 # for snprintf in libwlibc.a
+objs        := $(arch)/crt0.o
+objs        += $(arch)/bootstrap.o
+objs        += $(arch)/arch.o
+objs        += $(arch)/entry.o
+objs        += thread.o
+objs        += threads.o
+objs        += singletons.o
+objs        += kip.o
+objs        += printk.o
+objs        += kentry.o
+objs        += syscalls.o
+objs        += ipc.o
+objs        += startup.o
+objs        += common.o
+incflags    := -I.
+incflags    += -I$(cfgdir)
+incflags    += -I$(arch)
+incflags    += -I$(wrmdir)/lib/sys/$(arch)
+incflags    += -I$(wrmdir)/lib/sys
+incflags    += -I$(wrmdir)/lib/list
+incflags    += -I$(wrmdir)/lib/l4/inc
+incflags    += -I$(wrmdir)/lib/wlibc/inc
+incflags    += -I$(wrmdir)/lib/shell
+incflags    += -I$(wrmdir)/lib/cbuf
+incflags    += -I$(wrmdir)/lib/uart/$(uart)
+incflags    += -I$(wrmdir)/lib/timer/$(timer)
+incflags    += -I$(wrmdir)/lib/intc/$(intc)
+incflags    += -I$(wrmdir)/lib/mmu/$(mmu)
+baseflags   += $(use_baseflags) $(use_warns)
+cxxflags    := -fno-rtti # to avoid undefined reference to `vtable ...'
+cxxflags    += # -std=c++11
+ldflags     :=
+libs        += $(addprefix $(blddir)/../lib/,$(use_libs))
+ldaddr_file := $(cfgdir)/kernel-load-addr.h
 
-include ../mk/base.mk
-include ../mk/syscfg.mk
-
-postbuild-target: update-next-load-addr
-
+include $(wrmdir)/mk/base.mk

@@ -4,8 +4,6 @@
 #
 ####################################################################################################
 
-blddir    ?= build
-target    ?= libgreth.a
 objs      := greth.o
 incflags  := 
 baseflags := -Wall -Werror -pedantic -pedantic-errors
@@ -17,4 +15,4 @@ else
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

@@ -4,12 +4,13 @@
 #
 ####################################################################################################
 
-blddir    ?= build
-target    ?= libl4.a
 objs      := src/api.o
 objs      += src/$(arch)/api.o
-incflags  := -I$(cfgdir) -Iinc -I../uart -I../sys -I../sys/$(arch)
-incflags  += -I../../lib/wlibc/inc
+incflags  := -I$(cfgdir)
+incflags  += -Iinc
+incflags  += -I$(wrmdir)/lib/sys
+incflags  += -I$(wrmdir)/lib/sys/$(arch)
+incflags  += -I$(wrmdir)/lib/wlibc/inc
 baseflags := -O0 -Wall -Werror
 cflags    :=
 cxxflags  := -std=c++11 -fno-rtti -fno-exceptions
@@ -20,4 +21,4 @@ else
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

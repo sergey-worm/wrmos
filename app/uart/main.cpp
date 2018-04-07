@@ -11,9 +11,10 @@
 #include "sys_utils.h"
 #include "l4_api.h"
 #include "wrmos.h"
-#include "uart.h"
 #include "cbuf.h"
 
+#define UART_WITH_VIDEO
+#include "uart.h"
 
 // one-directional stream
 struct Stream_t
@@ -434,26 +435,34 @@ int main(int argc, const char* argv[])
 
 	char buf[256];
 
+	unsigned cnt_rx = 0;
+	unsigned cnt_tx = 0;
+	unsigned cnt_all = 0;
+
 	// wait interrupt loop
 	while (1)
 	{
 		// wait interrupt
-		//wrm_logd("hw:  wait interrupt ...\n");
+		//wrm_logd("hw:  wait interrupt ... (rx=%u, tx=%u all=%u).\n", cnt_rx, cnt_tx, cnt_all);
 		rc = wrm_dev_wait_int(intno, 1);  // 1 - Need_ack_befor_reenable
 		assert(!rc);
+		cnt_all++;
 
 		int status = uart_status(ioaddr);
+
+		//uart_ack(ioaddr); // ???
 
 		//if (!status) // !status - it is normal for real hw, not qemu
 		//	wrm_loge("hw:  status:  rx=%d, tx=%d.\n", status & Uart_status_rx_full, status & Uart_status_tx_empty);
 
 		if (status & Uart_status_rx_full)
 		{
+			cnt_rx++;
 			rc = uart_get_buf(ioaddr, buf, sizeof(buf));
 			//wrm_logd("hw:  read from uart %d bytes.\n", rc);
 			if (rc > 0)
 			{
-				//wrm_logi("hw:  rx(%u):  %.*s.\n", rc, rc, buf);
+				//wrm_logd("hw:  rx(%u):  '%.*s' (rx=%u, tx=%u all=%u)\n", rc, rc, buf, cnt_rx, cnt_tx, cnt_all);
 				unsigned written = driver.rx.cbuf.write(buf, rc);
 				if (written != (unsigned) rc)
 					wrm_loge("hw:  rx_buf full, lost %u bytes.\n", rc - written);
@@ -471,6 +480,7 @@ int main(int argc, const char* argv[])
 
 		if (status & Uart_status_tx_empty)
 		{
+			cnt_tx++;
 			write_to_uart(0);
 		}
 	}

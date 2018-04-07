@@ -185,10 +185,10 @@ public:
 	inline void   set_carry_bit()     { /* TODO */ }
 	inline void   clear_carry_bit()   { /* TODO */ }
 
-	inline word_t entry_pc() const    { return 0; /* return proc_status_frame.pc;  TODO */ }  // get entry pc
+	inline word_t entry_pc() const    { return syscall_frame.lr - 4;                       }  // get entry pc
 	inline void   entry_pc(word_t v)  { (void)v;  /* proc_status_frame.pc = v;     TODO */ }  // set entry pc
-	inline word_t entry_pc2() const   { return 0; /* return proc_status_frame.npc; TODO */ }  // get entry npc
-	inline void   entry_pc2(word_t v) { (void)v;  /* proc_status_frame.npc = v;    TODO */ }  // set entry npc
+	inline word_t entry_pc2() const   { return 0; }  // pc2 not need for arm
+	inline void   entry_pc2(word_t v) { (void)v;  }  // pc2 not need for arm
 
 	inline word_t exit_pc(int entry_type) const
 	{
@@ -206,19 +206,10 @@ public:
 		return 0;
 	}
 
+	// pc2 not need for arm
 	inline word_t exit_pc2(int entry_type) const
 	{
 		(void)entry_type;
-		/*
-		switch (entry_type)
-		{
-			case Entry_type_syscall:  return proc_status_frame.npc + 4;
-			case Entry_type_pfault:   return proc_status_frame.npc;
-			case Entry_type_kpfault:  return 0;  // invalid
-			case Entry_type_irq:      return proc_status_frame.npc;
-			case Entry_type_exc:      return 0;  // unknown, will defined in exc-reply
-		}
-		*/
 		return 0;
 	}
 

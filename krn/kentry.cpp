@@ -210,6 +210,7 @@ void kentry_irq(unsigned irq)
 	if (irq == Cfg_krn_timer_irq)
 	{
 		Timer::irq_ack();
+		Intc::eoi(irq);
 		kern_timer_tick();
 	}
 	else

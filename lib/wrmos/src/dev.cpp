@@ -94,7 +94,7 @@ extern "C" int wrm_dev_map_io(const char* dev_name, addr_t* addr, size_t* size)
 	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
-		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
+		wrm_loge("%s:  l4_ipc(alpha) - rc=%u.\n", __func__, rc);
 		return -2;
 	}
 
@@ -118,7 +118,7 @@ extern "C" int wrm_dev_map_io(const char* dev_name, addr_t* addr, size_t* size)
 
 	if (tag.untyped() == 1) // error reply
 	{
-		wrm_loge("%s:  Wrm_ipc_map_io failed, ecode=%lu.\n", __func__, ecode);
+		wrm_loge("%s:  Wrm_ipc_map_io - dev=%s, ecode=%lu.\n", __func__, dev_name, ecode);
 		if (ecode == 1)   // no app
 			return -4;
 		if (ecode == 2)   // no device
@@ -165,7 +165,7 @@ static int send_attach_detach_request(const char* dev_name, unsigned* intno, uns
 	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
-		wrm_loge("%s:  l4_ipc(alpha) failed, rc=%u.\n", __func__, rc);
+		wrm_loge("%s:  l4_ipc(alpha) - rc=%u.\n", __func__, rc);
 		return -2;
 	}
 
@@ -185,7 +185,7 @@ static int send_attach_detach_request(const char* dev_name, unsigned* intno, uns
 	if ((int)irq < 0)     // error reply
 	{
 		int ecode = (int)irq;
-		wrm_loge("%s:  Wrm_ipc_map_io failed, ecode=%d.\n", __func__, ecode);
+		wrm_loge("%s:  Wrm_ipc_map_io - dev=%s, ecode=%d.\n", __func__, dev_name, ecode);
 		if (ecode == 1)   // no app
 			return -4;
 		if (ecode == 2)   // no device

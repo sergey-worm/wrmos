@@ -4,9 +4,6 @@
 #
 ####################################################################################################
 
-blddir    ?= build
-target    ?= libwrmos.a
-srcdir    := src
 files     := app_start.o
 files     += log.o
 files     += mpool.o
@@ -22,12 +19,12 @@ files     += app_user.o
 objs      := $(addprefix src/,$(files))
 incflags  := -Iinc
 incflags  += -I$(cfgdir)
-incflags  += -I../sys
-incflags  += -I../sys/$(arch)
-incflags  += -I../l4/inc
-incflags  += -I../list
-incflags  += -I../elfloader
-incflags  += -I../wlibc/inc
+incflags  += -I$(wrmdir)/lib/sys
+incflags  += -I$(wrmdir)/lib/sys/$(arch)
+incflags  += -I$(wrmdir)/lib/l4/inc
+incflags  += -I$(wrmdir)/lib/list
+incflags  += -I$(wrmdir)/lib/elfloader
+incflags  += -I$(wrmdir)/lib/wlibc/inc
 baseflags := -O2 -Wall -Werror
 cflags    :=
 cxxflags  := -std=c++11 -fno-rtti -fno-exceptions
@@ -38,4 +35,4 @@ ifeq ($(dbg),1)
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

@@ -11,7 +11,7 @@
 extern "C" void arm_entry_undef(addr_t spsr, addr_t inst)
 {
 	force_printk("undef_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
-	while (1);
+	panic("TODO");
 }
 
 extern "C" void arm_entry_iabort(addr_t spsr, addr_t inst)
@@ -77,7 +77,7 @@ extern "C" void arm_entry_dabort(addr_t spsr, addr_t inst)
 extern "C" void arm_entry_reset(addr_t spsr, addr_t inst)
 {
 	force_printk("reset_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
-	while (1);
+	panic("TODO");
 }
 
 extern "C" void arm_entry_irq(addr_t spsr, addr_t inst)
@@ -107,7 +107,7 @@ extern "C" void arm_entry_fiq(addr_t spsr, addr_t inst)
 
 	printf("fiq_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
 	Intc::dump(dprint1);
-	while (1);
+	panic("TODO");
 
 	Sched_t::current()->tmevent_kexit_start(SystemClock_t::sys_clock(__func__));
 }

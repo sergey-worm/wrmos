@@ -18,7 +18,7 @@
 */
 
 #include "sys-config.h"
-#include "next-load-addr.h"
+#include "alpha-load-addr.h"
 
 page_sz = Cfg_page_sz;
 

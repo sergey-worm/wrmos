@@ -118,7 +118,7 @@ public:
 	inline word_t scall_exreg_ip2()     const { return 0;                 }
 	inline word_t scall_exreg_flags()   const { return syscall_frame.edi; }
 	inline word_t scall_exreg_uhandle() const { return syscall_frame.ebx; }
-	inline word_t scall_exreg_pager()   const { return syscall_frame.ebp; }
+	inline word_t scall_exreg_pager()   const { return syscall_frame.ebp; } // XXX be careful
 	inline void   scall_exreg_result(word_t v)  { syscall_frame.eax = v; }
 	inline void   scall_exreg_control(word_t v) { syscall_frame.ecx = v; }
 	inline void   scall_exreg_sp(word_t v)      { syscall_frame.edx = v; }
@@ -126,7 +126,7 @@ public:
 	inline void   scall_exreg_ip2(word_t v)     { (void)v;               }
 	inline void   scall_exreg_flags(word_t v)   { syscall_frame.edi = v; }
 	inline void   scall_exreg_uhandle(word_t v) { syscall_frame.ebx = v; }
-	inline void   scall_exreg_pager(word_t v)   { syscall_frame.ebp = v; }
+	inline void   scall_exreg_pager(word_t v)   { syscall_frame.ebp = v; }  // XXX be careful
 
 	inline word_t scall_thctl_dest()          const { return syscall_frame.eax; }
 	inline word_t scall_thctl_space()         const { return syscall_frame.esi; }
@@ -174,7 +174,7 @@ public:
 	inline word_t scall_mctl_attr0()    const { return syscall_frame.ecx; }
 	inline word_t scall_mctl_attr1()    const { return syscall_frame.edx; }
 	inline word_t scall_mctl_attr2()    const { return syscall_frame.ebx; }
-	inline word_t scall_mctl_attr3()    const { return syscall_frame.ebp; }
+	inline word_t scall_mctl_attr3()    const { return syscall_frame.esi; } // L4 doc wants %ebp here
 	inline void   scall_mctl_result(word_t v)  { syscall_frame.eax = v; }
 
 	inline word_t scall_kdb_opcode() const { return syscall_frame.eax; }
@@ -189,10 +189,10 @@ public:
 	inline void   set_carry_bit()     { /* TODO */ }
 	inline void   clear_carry_bit()   { /* TODO */ }
 
-	inline word_t entry_pc() const    { return 0; /* return proc_status_frame.pc;  TODO */ }  // get entry pc
-	inline void   entry_pc(word_t v)  { (void)v;  /* proc_status_frame.pc = v;     TODO */ }  // set entry pc
-	inline word_t entry_pc2() const   { return 0; /* return proc_status_frame.npc; TODO */ }  // get entry npc
-	inline void   entry_pc2(word_t v) { (void)v;  /* proc_status_frame.npc = v;    TODO */ }  // set entry npc
+	inline word_t entry_pc() const    { return syscall_frame.ip(); }  // get entry pc
+	inline void   entry_pc(word_t v)  { (void)v;  /* TODO */ }        // set entry pc
+	inline word_t entry_pc2() const   { return 0; }  // not need for x86
+	inline void   entry_pc2(word_t v) { (void)v;  }  // not need for x86
 
 	inline word_t exit_pc(int entry_type) const
 	{
@@ -212,17 +212,8 @@ public:
 
 	inline word_t exit_pc2(int entry_type) const
 	{
+		// nothing for x86
 		(void)entry_type;
-		/*
-		switch (entry_type)
-		{
-			case Entry_type_syscall:  return proc_status_frame.npc + 4;
-			case Entry_type_pfault:   return proc_status_frame.npc;
-			case Entry_type_kpfault:  return 0;  // invalid
-			case Entry_type_irq:      return proc_status_frame.npc;
-			case Entry_type_exc:      return 0;  // unknown, will defined in exc-reply
-		}
-		*/
 		return 0;
 	}
 

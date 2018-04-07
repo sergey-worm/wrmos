@@ -10,7 +10,7 @@
 */
 
 #include "krn-config.h"
-#include "next-load-addr.h"
+#include "kernel-load-addr.h"
 
 page_sz            = Cfg_page_sz;
 _kern_pload        = Cfg_load_addr;

@@ -464,7 +464,7 @@ private:
 		kmap(va_bss,    kmem_paddr(va_bss,    sz_bss),    sz_bss,    Acc_kdata);
 
 		// map kernel io space
-		// if lowest byte 1 - don't map
+		// if lowest bit 1 - don't map
 		if (!(Cfg_krn_uart_paddr & 1))
 			kmap(kuart_pg_va(),  round_pg_down(Cfg_krn_uart_paddr),  Kio_uart_pg_sz,  Acc_kio, NotCachable);
 		if (!(Cfg_krn_intc_paddr & 1))

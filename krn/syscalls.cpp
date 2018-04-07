@@ -591,7 +591,7 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 	for (unsigned i=0; i<num; ++i)
 	{
 		int attr_index = cur.uutcb()->mr[i] & 0x3;
-		int cached = attr[attr_index] == 1  ?  NotCachable  :  Cachable;
+		int cached = (attr[attr_index] == 1) ? NotCachable : Cachable;
 		L4_fpage_t fp = L4_fpage_t::create(cur.uutcb()->mr[i]);
 
 		int cur_attr = cur.task()->attributes(fp);
@@ -603,7 +603,7 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 		}
 
 		// NOTE 1:  sigma0 and roottask have 1:1 maping
-		// NOTE 2:  result acc will be cur | map_acc  -->  use map_acc=0x0
+		// NOTE 2:  result acc will be (cur | map_acc)  -->  use map_acc=0x0
 		cur.task()->map(fp.addr(), fp.addr(), fp.size(), Aspace::uacc2acc(0), cached);
 	}
 

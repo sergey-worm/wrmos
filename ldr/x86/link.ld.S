@@ -4,7 +4,7 @@
 */
 
 #include "sys-config.h"
-#include "next-load-addr.h"
+#include "bootloader-load-addr.h"
 
 boot0_addr = 0x7c00; /* BIOS loads first 512 bytes (MBR) at 0x7c00 and execute it */
 boot0_sz   = 0x200;

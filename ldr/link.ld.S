@@ -18,7 +18,7 @@
 */
 
 #include "sys-config.h"
-#include "next-load-addr.h"
+#include "bootloader-load-addr.h"
 
 
 ENTRY(_start)

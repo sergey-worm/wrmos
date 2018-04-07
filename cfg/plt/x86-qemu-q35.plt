@@ -33,12 +33,12 @@ krn_tick_usec    = 10000
 krn_uart_paddr   = (0xb8000 + 0x3f8) # video_mem + ioport_COM1
 krn_uart_sz      = 0x100
 krn_uart_bitrate = 115200
-krn_uart_irq     = 300 # ???
+krn_uart_irq     = 4
 
-krn_intc_paddr   = 0x1 # lowest byte 1 - don't need kmap
+krn_intc_paddr   = 0x1 # lowest bit 1 - don't need kmap
 krn_intc_sz      = 0x0
 
-krn_timer_paddr  = 0x1 # lowest byte 1 - don't need kmap
+krn_timer_paddr  = 0x1 # lowest bit 1 - don't need kmap
 krn_timer_sz     = 0x0
 krn_timer_irq    = 0
 

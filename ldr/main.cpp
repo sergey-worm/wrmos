@@ -312,7 +312,7 @@ extern "C" int main()
 			roottask_file = file;
 
 		printf("[ldr]  %2u  %-16s  0x%08lx  %8u  '%.8s ...'\n",
-			cnt, file->name, (addr_t)file->data, file->size, file->data);
+			cnt, file->name, (addr_t)file->data, file->size, (char*)file->data);
 
 		assert((addr_t)file->data >= ramfs_addr  &&
 			((addr_t)file->data + file->size) < (ramfs_addr + ramfs_sz));

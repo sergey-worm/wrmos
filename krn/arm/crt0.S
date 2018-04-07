@@ -82,7 +82,7 @@ handler_swi:
 
 	exception_entry             //
 	sub r0, lr, #4              // instruction
-	bl arm_entry_syscall         //
+	bl arm_entry_syscall        //
 	exception_exit              //
 	movs pc, lr                 // return
 

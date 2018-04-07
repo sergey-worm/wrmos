@@ -123,7 +123,7 @@ enum
 	Type_system,
 
 	Limit_bytes,
-	Limit_4kbloks,
+	Limit_4kblocks,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -185,7 +185,7 @@ struct Glob_desc_t
 		_limit_hi4       = limit >> 16;
 		_dpl             = priv == Priv_kernel ? 0 : 3;
 		_present         = 1;
-		_g               = gran == Limit_4kbloks ? 1 : 0;
+		_g               = gran == Limit_4kblocks ? 1 : 0;
 		_avl             = 0; // avail to sys prog (?)
 		_is_code_or_data = type == Type_system ? 0 : 1;
 
@@ -227,7 +227,7 @@ static_assert(sizeof(Glob_desc_t) == 8);
 struct Gdtr_t
 {
 	uint16_t limit;     // table size in bytes minus 1
-	uintptr_t base;     // base address
+	long base;          // base address
 } __attribute__((packed));
 
 static_assert(sizeof(Gdtr_t) == sizeof(word_t) + 2);
@@ -236,12 +236,12 @@ Glob_desc_t gdt[8] __attribute__((aligned(8)));
 
 Tss_t tss;
 
-void set_ksp(uintptr_t ksp)
+void set_ksp(long ksp)
 {
 	tss.set_ksp(ksp);
 }
 
-uintptr_t get_ksp()
+long get_ksp()
 {
 	return tss.get_ksp();
 }
@@ -265,16 +265,16 @@ void set_gdt()
 	if (sizeof(long) == 4)
 	{
 		// 0x08:  code, kernel, all address space
-		gdt[1].set(0x0, 0xfffff, Limit_4kbloks, Type_code, Priv_kernel, Opsz_32bit);
+		gdt[1].set(0x0, 0xfffff, Limit_4kblocks, Type_code, Priv_kernel, Opsz_32bit);
 
 		// 0x10:  date, kernel, all address space
-		gdt[2].set(0x0, 0xfffff, Limit_4kbloks, Type_data, Priv_kernel, Opsz_32bit);
+		gdt[2].set(0x0, 0xfffff, Limit_4kblocks, Type_data, Priv_kernel, Opsz_32bit);
 
 		// 0x18:  code, user, all address space
-		gdt[3].set(0x0, 0xfffff, Limit_4kbloks, Type_code, Priv_user, Opsz_32bit);
+		gdt[3].set(0x0, 0xfffff, Limit_4kblocks, Type_code, Priv_user, Opsz_32bit);
 
 		// 0x20:  date, user, all address space
-		gdt[4].set(0x0, 0xfffff, Limit_4kbloks, Type_data, Priv_user, Opsz_32bit);
+		gdt[4].set(0x0, 0xfffff, Limit_4kblocks, Type_data, Priv_user, Opsz_32bit);
 
 		// 0x28:  task state segment
 		gdt[5].set((long)&tss, sizeof(tss), Limit_bytes, Type_system, Priv_kernel, Opsz_32bit);
@@ -313,7 +313,7 @@ void set_gdt()
 
 	Gdtr_t gdtr;
 	gdtr.limit = sizeof(gdt) - 1;
-	gdtr.base  = (uintptr_t) gdt;
+	gdtr.base  = (long) gdt;
 
 	asm volatile ("lgdt %0" :: "m"(gdtr));
 	reload_cs_0x08();
@@ -350,7 +350,7 @@ struct Int_gate_t
 	} __attribute__((packed));
 	uint16_t offset_hi16;      // offset bits 16..31
 
-	inline void set(uintptr_t handler, unsigned priv)
+	inline void set(long handler, unsigned priv)
 	{
 		offset_lo16 = handler & 0xffff;
 		offset_hi16 = handler >> 16;
@@ -377,7 +377,7 @@ struct Int_gate_t
 	uint16_t selector;         // code segment selector in GDT or LDT
 	struct
 	{
-		unsigned ist     : 3;  // ndex in interrupt stack table for tss.ist[]
+		unsigned ist     : 3;  // index in interrupt stack table for tss.ist[]
 		unsigned null1   : 1;  // should be '0' for interrupt gate
 		unsigned null2   : 1;  // should be '0' for interrupt gate
 		unsigned null3   : 3;  // should be '0' for interrupt gate
@@ -390,7 +390,7 @@ struct Int_gate_t
 	uint32_t offset_hi32;      // offset bits 32..63
 	uint32_t null4;            // should be '0'
 
-	void set(uintptr_t handler, unsigned priv)
+	void set(long handler, unsigned priv)
 	{
 		offset_lo16 = handler & 0xffff;
 		offset_mi16 = (handler >> 16) & 0xffff;
@@ -416,7 +416,7 @@ Int_gate_t idt[256];
 struct Idtr_t
 {
 	uint16_t limit;     // table size minus 1
-	uintptr_t base;     // base address
+	long base;          // base address
 } __attribute__((packed));
 
 static_assert(sizeof(Idtr_t) == sizeof(word_t) + 2);
@@ -426,7 +426,7 @@ void set_idt()
 	memset(idt, 0, sizeof(idt));
 
 	extern int gate_table;
-	uintptr_t* gate_table_arr = (uintptr_t*)&gate_table;
+	long* gate_table_arr = (long*)&gate_table;
 
 	for (int i=0; i<0xff; ++i)
 	{
@@ -435,7 +435,7 @@ void set_idt()
 
 	Idtr_t idtr;
 	idtr.limit = sizeof(idt) - 1;
-	idtr.base  = (uintptr_t) idt;
+	idtr.base  = (long) idt;
 
 	asm volatile ("lidt %0" :: "m"(idtr));
 }

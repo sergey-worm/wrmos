@@ -4,17 +4,11 @@
 #
 ####################################################################################################
 
-blddir    ?= build
-target    ?= libwstdc++.a
 objs      := stdc++.o
-incflags  := -I../sys
-incflags  += -I../wlibc/inc
+incflags  := -I$(wrmdir)/lib/sys
+incflags  += -I$(wrmdir)/lib/wlibc/inc
 baseflags += -O2 -Wall -Werror
 cxxflags  += -std=c++11 -fno-rtti -fno-exceptions
-
-ifeq ($(arch),x86_64)
-  baseflags  += -mcmodel=kernel  # it need for 64-bit kernel
-endif
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
@@ -22,4 +16,4 @@ ifeq ($(dbg),1)
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

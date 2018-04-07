@@ -328,12 +328,15 @@ public:
 		return 0;
 	}
 
-	// sz - may not be aligned
 	// incomming region may contents many existing regions
 	void set_location_from_elf(addr_t rem_va, size_t sz, addr_t location)
 	{
 		assert(is_aligned(rem_va, Cfg_page_sz));
+		assert(is_aligned(sz, Cfg_page_sz));
 		assert(is_aligned(location, Cfg_page_sz));
+		assert(rem_va);
+		assert(sz);
+		assert(location);
 		addr_t rem_end = rem_va + sz;
 		for (regions_t::iter_t it=_regions.begin(); it!=_regions.end(); ++it)
 		{
@@ -344,7 +347,6 @@ public:
 
 				if (it->need_relocate()) // writable region, will allocate later
 				{
-					assert(it->sz == Cfg_page_sz && "writable regs must be splited to Page_size regs");
 					it->local_origin = local;
 				}
 				else
@@ -617,7 +619,7 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	assert(utcb_location);
 	rc = l4_thread_control(newid, space, sched, pager, utcb_location);
 	if (rc)
-		panic("l4_thread_control() - rc=%u.", rc);
+		panic("%s:  l4_thread_control() - rc=%u.", __func__, rc);
 
 	// set thread params via Schedule
 	rc = l4_schedule(newid, -1, -1, app->max_prio(), -1);
@@ -637,7 +639,7 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	pager = alpha;
 	rc = l4_thread_control(newid, space, sched, pager, -1);
 	if (rc)
-		panic("l4_thread_control() - rc=%u.", rc);
+		panic("%s:  l4_thread_control() - rc=%u.", __func__, rc);
 
 	// start app by sending Thread_start msg
 	L4_utcb_t* utcb = l4_utcb();

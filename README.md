@@ -4,19 +4,19 @@ RTOS based on L4 microkernel.
 
 ## Description
 
-	WrmOS - RTOS based on L4 microkernel.
+WrmOS - RTOS based on L4 microkernel.
 
-	WrmOS includes:
+WrmOS includes:
 
-	* kernel       - mikrokernel based on "L4 kernel reference manual";
-	* applications - sigma0 (rootpager), alpha (roottask), tcpip, etc;
-	* libraries    - wlibc, wstdc++, psockets, elfloader, etc.
-	* build system - based on config files and makefiles (dirs cfg/ and mk/);
-	* bootloader   - bootstrap the system, parse ramfs and load the kernel.
+* kernel       - mikrokernel based on "L4 kernel reference manual";
+* applications - sigma0 (rootpager), alpha (roottask), tcpip, etc;
+* libraries    - wlibc, wstdc++, psockets, elfloader, etc.
+* build system - based on config files and makefiles (dirs cfg/ and mk/);
+* bootloader   - bootstrap the system, parse ramfs and load the kernel.
 
 ## How to
 
-	Build and run:
+Build and run:
 
 	qemu-sparc-leon3:
 		make build P=cfg/prj/hello-qemu-leon3.prj B=../build -j
@@ -42,25 +42,28 @@ RTOS based on L4 microkernel.
 		make build P=cfg/prj/hello-rpi.prj B=../build -j
 		TODO:  how to run ?
 
+Autotest (sanity check):
+
+	mk/test.sh
+
 ## Project state
 
-	Now supportes 4 archs:  SPARC, ARM, x86, x86_64.
-	On SPARC successfull works complex real time projects.
-	On other archs works just simple examples like HelloWorld.
+Now supportes 4 archs:  SPARC, ARM, x86, x86_64.
+On SPARC successfull works complex real time projects.
+On other archs works just simple examples like HelloWorld.
 
-	WrmOS have own implementation of next components:
-		- libc   - lib/wlibc (some basic functions);
-		- stdc++ - lib/stdc++ (few basic functions);
-		- tcp/ip - tcpip server app/tcpip (arp, udp, tcp, ip, ...);
+WrmOS have own implementation of next components:
+- libc   - lib/wlibc (some basic functions);
+- stdc++ - lib/stdc++ (few basic functions);
+- tcp/ip - tcpip server app/tcpip (arp, udp, tcp, ip, ...);
 
 ## Plans
 
-	1. Run WrmOS on real hardware for ARM, x86 and x86_64;
-	2. Support SMP;
-	3. Adapt ucLibc to WrmOS;
-	4. Adapt Linux to works on top of WrmOS - w4linux;
+1. Run WrmOS on real hardware for ARM, x86 and x86_64;
+1. Support SMP;
+1. Support ROS API (ros.org).
 
 ## Contacts
 
-	Sergey Worm <sergey.worm@gmail.com>
+Sergey Worm <sergey.worm@gmail.com>
 

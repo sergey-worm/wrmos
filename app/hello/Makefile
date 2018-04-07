@@ -6,29 +6,25 @@
 #    dbg       - debug flag
 #    cfgdir    - path to dir that contents sys-config.h
 #    blddir    - path to dir that will content build result
+#    target    - target elf file name (hello.elf)
 #
 ####################################################################################################
 
-blddir     ?= build
-target     ?= hello.elf
 objs       := main.o
 incflags   := -I$(cfgdir)
-incflags   += -I../../lib/l4/inc
-incflags   += -I../../lib/sys
-incflags   += -I../../lib/sys/$(arch)
-incflags   += -I../../lib/list
-incflags   += -I../../lib/wrmos/inc
+incflags   += -I$(wrmdir)/lib/l4/inc
+incflags   += -I$(wrmdir)/lib/sys
+incflags   += -I$(wrmdir)/lib/sys/$(arch)
+incflags   += -I$(wrmdir)/lib/list
+incflags   += -I$(wrmdir)/lib/wrmos/inc
 baseflags  := -O2 -Wall -Werror
 cxxflags   := -std=c++11 -fno-rtti -fno-exceptions
-ldflags    := --fatal-warnings
-ldflags    += -zmax-page-size=0x1000
-libs       :=
-libs       += $(blddir)/../../lib/l4/libl4.a
-libs       += $(blddir)/../../lib/sys/libsys.a
-libs       += $(blddir)/../../lib/wrmos/libwrmos.a
-libs       += $(blddir)/../../lib/wlibc/libwlibc.a
-libs       += $(blddir)/../../lib/wstdc++/libwstdc++.a
-use_libgcc := 1 # for snprintf in libwlibc.a
+ldflags    :=
+libs       := $(rtblddir)/lib/l4/libl4.a
+libs       += $(rtblddir)/lib/sys/libsys.a
+libs       += $(rtblddir)/lib/wrmos/libwrmos.a
+libs       += $(rtblddir)/lib/wlibc/libwlibc.a
+libs       += $(rtblddir)/lib/wstdc++/libwstdc++.a
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
@@ -36,4 +32,4 @@ ifeq ($(dbg),1)
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

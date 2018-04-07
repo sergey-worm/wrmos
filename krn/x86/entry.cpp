@@ -240,7 +240,7 @@ extern "C" void x86_entry_trap(word_t gateno, Entry_frame_t* eframe)
 {
 	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__));
 
-	//printk("trap:  gateno=0x%lx/%lu, frame=0x%lx.\n", gateno, gateno, eframe);
+	//printk("trap:  gateno=0x%lx/%lu, frame=0x%p.\n", gateno, gateno, eframe);
 	//eframe->dump();
 	//printk("eframe=0x%p, cur_eframe=0x%p.\n", eframe, Sched_t::current()->entry_frame());
 

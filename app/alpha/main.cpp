@@ -601,7 +601,7 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 	unsigned cnt = 0;
 	while (dev && *dev->name)
 	{
-		wrm_logi("    %2u  %-8s  0x%08llx   0x%08llx   %2d\n",
+		wrm_logi("    %2u  %-8s  0x%08llx   0x%08llx  %3d\n",
 			cnt, dev->name, (long long)dev->pa, (long long)dev->sz, dev->irq);
 		dev = Mmio_device_t::next(dev);
 		cnt++;
@@ -948,8 +948,8 @@ int do_iospace_request(L4_fpage_t iospace)
 	word_t mr[L4_utcb_t::Mr_words];
 	memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
-	//wrm_logi("rx:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
-	//	from.raw(), from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
+	//wrm_logd("rx:  from=%u, tag=0x%lx, u=%u, t=%u, mr[1]=0x%lx, mr[2]=0x%lx.\n",
+	//	from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 
 	assert(tag.untyped() == 0);
 	assert(tag.typed() == 2);
@@ -968,7 +968,7 @@ int do_iospace_request(L4_fpage_t iospace)
 		return -2;
 	}
 
-	//wrm_logi("rcv iospace:  addr=%#x, sz=%#x.\n", fpage.addr(), fpage.size());
+	//wrm_logd("rcv iospace:  addr=%#lx, sz=%#lx.\n", fpage.addr(), fpage.size());
 
 	rc = make_not_cached(&fpage, 1);
 	if (rc)
@@ -990,10 +990,10 @@ void get_iospace_from_sigma0(const Proj_cfg_t* proj_cfg)
 		// map ioarea page by page
 		const paddr_t pa_first = round_pg_down(dev->pa);
 		const paddr_t pa_final = round_pg_down(dev->pa + dev->sz - 1);
-		//wrm_logd("Map IOspace:  %s:  0x%llx - 0x%llx.\n\n", dev->name, pa_first, pa_final);
+		//wrm_logd("Map IOspace:  %s:  0x%llx - 0x%llx.\n", dev->name, pa_first, pa_final);
 		for (paddr_t pa=pa_first; pa<=pa_final; pa+=Cfg_page_sz)
 		{
-			//wrm_logd("Map IOspace:  %s:  0x%llx.\n", dev->name, pa);
+			//wrm_logd("Map IOspace page:  %s:  0x%llx.\n", dev->name, pa);
 			L4_fpage_t io = L4_fpage_t::create(pa, Cfg_page_sz, Acc_rw);
 			assert(!io.is_nil());
 			int rc = do_iospace_request(io);
@@ -1425,7 +1425,7 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 		int rc = l4_thread_control(L4_thrid_t::create_global(dev->irq, 1), space, sched, pager, 0);
 		if (rc)
 		{
-			wrm_loge("l4_thread_control() - failed, rc=%u.\n", rc);
+			wrm_loge("%s:  l4_thread_control() - failed, rc=%u.\n", __func__, rc);
 			ecode = 4;  // internal error
 			break;
 		}
@@ -1823,7 +1823,7 @@ void process_register_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t fro
 	assert(tag.untyped() <= Named_thread_t::Name_words_max);
 	assert(tag.typed() == 0);
 	const char* name = (const char*)&mr[1];  // FIXME:  do not access to MR via pointer
-	/**/wrm_logi("regthr:  %.*s.\n", Named_thread_t::Name_len_max, name);
+	//wrm_logi("regthr:  %.*s.\n", Named_thread_t::Name_len_max, name);
 
 	int ecode = 0;
 	word_t key0 = 1;
@@ -1907,7 +1907,7 @@ void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
 	assert(tag.untyped() == 1);
 	assert(tag.typed() == 0);
-	/**/wrm_logi("thrnums:  from=0x%lx/%u.\n", from.raw(), from.number());
+	//wrm_logi("thrnums:  from=0x%lx/%u.\n", from.raw(), from.number());
 
 	L4_thrid_t app_id = mr[1];
 	unsigned thrno_begin = 0;

@@ -26,14 +26,6 @@ public:
 		uart_init(_addr, baudrate, sys_clock_hz);
 	}
 
-	/*
-	static void dump(Print_t dprint)
-	{
-		assert(_addr != -1);
-		return intc_dump(_addr, dprint);
-	}
-	*/
-
 	static inline void putch(int c)
 	{
 		assert(_addr != -1);

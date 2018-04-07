@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "next-load-addr.h"
+#include "bootloader-load-addr.h"
 #include "ldr-config.h"
 
 #define UART_WITH_VIDEO

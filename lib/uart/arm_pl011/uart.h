@@ -83,14 +83,14 @@ inline void uart_init(unsigned base_addr, unsigned baudrate, unsigned sys_clock_
 
 	// divider = 3000000/(16 * 115200) = 1.627 = ~1
 	// fractional part register = (.627 * 64) + 0.5 = 40.6 = ~40
-	regs->ibrd = 1;  //mmio_write(base_addr + PL011_IBRD, 1);
-	regs->fbrd = 40; //mmio_write(base_addr + PL011_FBRD, 40);
+	regs->ibrd = 1;
+	regs->fbrd = 40;
 
 	// enable FIFO & 8 bit data transmissio (1 stop bit, no parity)
 	regs->lcrh = (1<<4) | (1<<5) | (1<<6);
 
 	// mask all interrupts
-	regs->imsc = 0x7ff; // (1<<1) | (1<<4) | (1<<5) | (1<<6) | (1<<7) | (1<<8) | (1<<9) | (1<<10);
+	regs->imsc = 0;
 
 	// enable UART, receive & transfer part of UART
 	regs->cr = (1<<0) | (1<<8) | (1<<9); // en, txen, rxen
@@ -99,22 +99,24 @@ inline void uart_init(unsigned base_addr, unsigned baudrate, unsigned sys_clock_
 // return 0/1 - is tx irq was enabled
 inline int uart_tx_irq(unsigned long base_addr, int enable)
 {
-	//TODO
-	(void)base_addr;
-	(void)enable;
-	return 0;
+	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
+	int mask = regs->imsc;
+	if (enable)
+		regs->imsc = mask | Irq_tx;
+	else
+		regs->imsc = mask & ~Irq_tx;
+	return (mask & Irq_tx) ? 1 : 0;
 }
 
 // return 0/1 - is rx irq was enabled
 inline int uart_rx_irq(unsigned long base_addr, int enable)
 {
-	//TODO
 	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
 	int mask = regs->imsc;
 	if (enable)
-		regs->imsc = mask & ~Irq_rx;
-	else
 		regs->imsc = mask | Irq_rx;
+	else
+		regs->imsc = mask & ~Irq_rx;
 	return (mask & Irq_rx) ? 1 : 0;
 }
 
@@ -136,13 +138,11 @@ inline int uart_status(unsigned long base_addr)
 	return res;
 }
 
-/*
 inline void uart_ack(unsigned long base_addr)
 {
- volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
- regs->icr = 0x7ff;  // clear pending interrupts
+	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
+	regs->icr = 0x7ff;  // clear pending interrupts
 }
-~*/
 
 // return error code (<0), or written bytes number (0 or 1)
 inline int uart_putc(unsigned long base_addr, int c)

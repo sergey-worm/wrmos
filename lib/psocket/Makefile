@@ -4,14 +4,12 @@
 #
 ####################################################################################################
 
-blddir     ?= build
-target     ?= libpsocket.a
 objs       := psocket.o
 incflags   := -I$(cfgdir)
-incflags   += -I../l4
-incflags   += -I../wrmos
-incflags   += -I../sys
-incflags   += -I../sys/$(arch)
+incflags   += -I$(wrmdir)/lib/l4
+incflags   += -I$(wrmdir)/lib/wrmos
+incflags   += -I$(wrmdir)/lib/sys
+incflags   += -I$(wrmdir)/lib/sys/$(arch)
 baseflags  := -O2 -Wall -Werror
 baseflags  += -fno-builtin # don't use builtin printf()
 
@@ -21,4 +19,4 @@ ifeq ($(dbg),1)
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
+include $(wrmdir)/mk/base.mk

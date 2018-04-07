@@ -57,6 +57,18 @@ public:
 	}
 	#endif
 
+	static inline void eoi(unsigned irq)
+	{
+		assert(_addr != -1);
+		#ifdef Cfg_arch_arm
+		int rc = intc_eoi(_addr, irq);
+		#else
+		int rc = 0; (void)irq;
+		#endif
+		(void)rc;
+		assert(!rc && "intc_eoi() failed");
+	}
+
 	static inline void mask(unsigned irq)
 	{
 		assert(_addr != -1);

@@ -213,7 +213,7 @@ public:
 
 		libcio_set_uart();
 
-		const char* line    = "+-------------------------------------------------------------------------------\n";
+		const char* line    = "+------------------------------------------------------------------------------\n";
 		const char* color   = "\x1b[1;33m";
 		const char* nocolor = "\x1b[0m";
 		const char* kind    = error_entry ? "Error" : "Debug";

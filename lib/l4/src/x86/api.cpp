@@ -38,7 +38,6 @@ L4_kip_t* l4_kip()
 	register int esi asm ("esi") = 0x33;
 	register int edi asm ("edi") = 0x44;
 	register int ebx asm ("ebx") = 0x55;
-	asm volatile ("mov %0, %%ebp" :: "n"(0x66));
 	(void)eax; (void)ecx; (void)edx; (void)esi; (void)edi; (void)ebx;
 	asm volatile ("push %0" :: "n"(L4_syscall_kernel_interface));
 	do_syscall();
@@ -62,10 +61,6 @@ L4_utcb_t* l4_local_id()
 }
 
 // do IPC syscall
-int l4_ipc(L4_thrid_t to, L4_thrid_t from_spec, L4_timeouts_t timeouts, L4_thrid_t& from) // obsolete
-{
-	return l4_ipc(to, from_spec, timeouts, &from);
-}
 int l4_ipc(L4_thrid_t to, L4_thrid_t from_spec, L4_timeouts_t timeouts, L4_thrid_t* from)
 {
 	register L4_thrid_t    eax asm ("eax") = to;
@@ -81,6 +76,7 @@ int l4_ipc(L4_thrid_t to, L4_thrid_t from_spec, L4_timeouts_t timeouts, L4_thrid
 	return l4_utcb()->msgtag().ipc_is_failed() ? l4_utcb()->ipc_error_code().error() : 0;
 }
 
+// TODO:  replace to common code
 // send phase only
 int l4_send(L4_thrid_t to, L4_time_t timeout)
 {
@@ -88,12 +84,8 @@ int l4_send(L4_thrid_t to, L4_time_t timeout)
 	return l4_ipc(to, L4_thrid_t::Nil, timeouts);
 }
 
+// TODO:  replace to common code
 // receive phase only
-int l4_receive(L4_thrid_t from_spec, L4_time_t timeout, L4_thrid_t& from) // obsolete
-{
-	L4_timeouts_t timeouts(L4_time_t::Never, timeout);
-	return l4_ipc(L4_thrid_t::Nil, from_spec, timeouts, from);
-}
 int l4_receive(L4_thrid_t from_spec, L4_time_t timeout, L4_thrid_t* from)
 {
 	L4_timeouts_t timeouts(L4_time_t::Never, timeout);
@@ -125,7 +117,7 @@ int l4_space_control(L4_thrid_t space, word_t control, L4_fpage_t kip, L4_fpage_
 	register L4_fpage_t esi asm ("esi") = utcbs;
 	register L4_thrid_t edi asm ("edi") = redirector;
 	(void)eax; (void)ecx; (void)edx; (void)esi; (void)edi;
-	asm volatile ("push %0" :: "n"(L4_syscall_space_control));
+	asm volatile ("pushl %0" :: "n"(L4_syscall_space_control));
 	do_syscall();
 	asm volatile ("add $4, %esp"); // leave syscall number
 	register word_t result asm ("eax");
@@ -140,8 +132,8 @@ int l4_memory_control(word_t control, word_t attr0, word_t attr1, word_t attr2, 
 	register word_t ecx asm ("ecx") = attr0;
 	register word_t edx asm ("edx") = attr1;
 	register word_t ebx asm ("ebx") = attr2;
-	asm volatile ("mov %0, %%ebp" :: "r"(attr3));
-	(void)eax; (void)ecx; (void)edx; (void)ebx;
+	register word_t esi asm ("esi") = attr3;  // L4 doc wants %ebp here
+	(void)eax; (void)ecx; (void)edx; (void)ebx; (void)esi;
 	asm volatile ("push %0" :: "n"(L4_syscall_memory_control));
 	do_syscall();
 	asm volatile ("add $4, %esp"); // leave syscall number
@@ -196,7 +188,8 @@ int l4_schedule(L4_thrid_t dest, word_t time_ctl, word_t proc_ctl, word_t prio,
 int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
              word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
 {
-// FIXME:  it works incorrect now
+// FIXME:  it works incorrect now, check %ebp and other
+*(int*)0 = 123;
 	register word_t     eax asm ("eax") = dest->raw();
 	register word_t     ecx asm ("ecx") = ctrl;
 	register word_t     edx asm ("edx") = sp ? *sp : 0;

@@ -6,28 +6,26 @@
 #    dbg       - debug flag
 #    cfgdir    - path to dir that contents sys-config.h
 #    blddir    - path to dir that will content build result
+#    target    - target elf file name (sigma0.elf)
 #
 ####################################################################################################
 
-blddir     ?= build
-target     ?= sigma0.elf
-objs       := $(arch)/crt0.o main.o
-incflags   := -I$(cfgdir)
-incflags   += -I../../lib/l4/inc
-incflags   += -I../../lib/sys
-incflags   += -I../../lib/sys/$(arch)
-incflags   += -I../../lib/list
-incflags   += -I../../lib/wrmos/inc
-incflags   += -I../../lib/wlibc/inc
-baseflags  := -O2 -Wall -Werror
-cxxflags   := -std=c++11 -fno-rtti -fno-exceptions
-ldflags    := --fatal-warnings
-ldflags    += -zmax-page-size=0x1000
-libs       := $(blddir)/../../lib/wlibc/libwlibc.a
-libs       += $(blddir)/../../lib/l4/libl4.a
-libs       += $(blddir)/../../lib/sys/libsys.a
-libs       += $(blddir)/../../lib/wrmos/libwrmos.a
-use_libgcc := 1 # for snprintf in libwlibc.a
+objs        := $(arch)/crt0.o main.o
+incflags    := -I$(cfgdir)
+incflags    += -I$(wrmdir)/lib/l4/inc
+incflags    += -I$(wrmdir)/lib/sys
+incflags    += -I$(wrmdir)/lib/sys/$(arch)
+incflags    += -I$(wrmdir)/lib/list
+incflags    += -I$(wrmdir)/lib/wrmos/inc
+incflags    += -I$(wrmdir)/lib/wlibc/inc
+baseflags   := -O2 -Wall -Werror
+cxxflags    := -std=c++11 -fno-rtti -fno-exceptions
+ldflags     :=
+libs        := $(rtblddir)/lib/wlibc/libwlibc.a
+libs        += $(rtblddir)/lib/l4/libl4.a
+libs        += $(rtblddir)/lib/sys/libsys.a
+libs        += $(rtblddir)/lib/wrmos/libwrmos.a
+ldaddr_file := $(cfgdir)/sigma0-load-addr.h
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
@@ -35,7 +33,4 @@ else
   baseflags += -DNDEBUG
 endif
 
-include ../../mk/base.mk
-include ../../mk/syscfg.mk
-
-postbuild-target: update-next-load-addr
+include $(wrmdir)/mk/base.mk

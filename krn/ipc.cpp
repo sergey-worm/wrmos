@@ -534,6 +534,8 @@ void do_ipc(Thread_t& cur, Entry_frame_t& eframe)
 				return;
 			}
 
+			Intc::eoi(irq);
+
 			printk("ipc:  re-enable interrupt %u.\n", irq);
 			if (flags & 0x1)  // flags:  is need clear befor unmask ?
 				Intc::clear(irq);

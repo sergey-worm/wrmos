@@ -99,7 +99,7 @@ static inline unsigned irqmax(volatile Intc_regs_t* regs)
 inline unsigned intc_irq(unsigned base_addr)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
-	return regs->gicc.hi_pend;
+	return regs->gicc.ack;
 }
 
 inline void intc_init(unsigned base_addr, Intc_print_t dprint)
@@ -146,6 +146,17 @@ inline int intc_clear(unsigned base_addr, unsigned irq)
 	if (irq >= irqmax(regs))
 		return 1;
 
+	// nothing for PL011
+	return 0;
+}
+
+inline int intc_eoi(unsigned base_addr, unsigned irq)
+{
+	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
+
+	if (irq >= irqmax(regs))
+		return 1;
+
 	regs->gicc.eoi = irq;
 	return 0;
 }
@@ -164,6 +175,11 @@ inline void intc_dump(unsigned base_addr, Intc_print_t dprint)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
+	volatile uint32_t* set_en   = regs->gicd.set_en;
+	volatile uint32_t* clr_en   = regs->gicd.clr_en;
+	volatile uint32_t* set_pend = regs->gicd.set_pend;
+	volatile uint32_t* clr_pend = regs->gicd.clr_pend;
+
 	print("ARM GIC v1:\n");
 	print("  GICC:\n");
 	print("    control:    0x%x\n", regs->gicc.control);
@@ -180,14 +196,10 @@ inline void intc_dump(unsigned base_addr, Intc_print_t dprint)
 	print("    type:       0x%x:  cpus=%u, irqs=%u\n", regs->gicd.type, ncpu(regs), irqmax(regs));
 	print("    imp_id:     0x%x\n", regs->gicd.imp_id);
 	print("    security:   0x%x\n", regs->gicd.security);
-	print("    set_en:     0x%x 0x%x 0x%x 0x%x\n", regs->gicd.set_en[0], regs->gicd.set_en[1],
-		regs->gicd.set_en[2], regs->gicd.set_en[3]);
-	print("    clr_en:     0x%x 0x%x 0x%x 0x%x\n", regs->gicd.clr_en[0], regs->gicd.clr_en[1],
-		regs->gicd.clr_en[2], regs->gicd.clr_en[3]);
-	print("    set_pend:   0x%x 0x%x 0x%x 0x%x\n", regs->gicd.set_pend[0], regs->gicd.set_pend[1],
-		regs->gicd.set_pend[2], regs->gicd.set_pend[3]);
-	print("    clr_pend:   0x%x 0x%x 0x%x 0x%x\n", regs->gicd.clr_pend[0], regs->gicd.clr_pend[1],
-		regs->gicd.clr_pend[2], regs->gicd.clr_pend[3]);
+	print("    set_en:     0x%x 0x%x 0x%x 0x%x\n", set_en[0], set_en[1], set_en[2], set_en[3]);
+	print("    clr_en:     0x%x 0x%x 0x%x 0x%x\n", clr_en[0], clr_en[1], clr_en[2], clr_en[3]);
+	print("    set_pend:   0x%x 0x%x 0x%x 0x%x\n", set_pend[0], set_pend[1], set_pend[2], set_pend[3]);
+	print("    clr_pend:   0x%x 0x%x 0x%x 0x%x\n", clr_pend[0], clr_pend[1], clr_pend[2], clr_pend[3]);
 }
 
 #undef print
