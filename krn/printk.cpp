@@ -24,18 +24,18 @@ void printk(const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
-	uint64_t time = SystemClock_t::sys_clock("printk");
+	uint64_t time = SystemClock_t::sys_clock(__func__);
 	print_pref(time);
 	vprintf(fmt, args);
 	printf("\x1b[0m");
 	va_end(args);
 }
-void printk_notime(const char* fmt, ...)
+void printk_tmr_pend(const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
-	//uint64_t time = SystemClock_t::sys_clock("printk_notime");
-	print_pref(0);
+	uint64_t time = SystemClock_t::sys_clock(__func__, 1);
+	print_pref(time);
 	vprintf(fmt, args);
 	printf("\x1b[0m");
 	va_end(args);

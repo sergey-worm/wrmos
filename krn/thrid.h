@@ -8,23 +8,24 @@
 #define THRID_H
 
 #include "l4_types.h"
+#include "wlibc_assert.h"
 
 inline L4_thrid_t thrid_sigma0()
 {
-	static L4_thrid_t id = L4_thrid_t::create_global(Kcfg::Kip_thrid_user_base + 0, 1);
+	static L4_thrid_t id = L4_thrid_t::create_global(Kcfg::Kip_thrid_user_base + 0);
 	return id;
 }
 
 inline L4_thrid_t thrid_roottask()
 {
-	static L4_thrid_t id = L4_thrid_t::create_global(Kcfg::Kip_thrid_user_base + 1, 1);
+	static L4_thrid_t id = L4_thrid_t::create_global(Kcfg::Kip_thrid_user_base + 1);
 	return id;
 }
 
 inline L4_thrid_t thrid_int(unsigned irq)
 {
-	assert(irq < Kcfg::Ints_max);
-	return L4_thrid_t::create_global(irq, 1);
+	wassert(irq < Kcfg::Ints_max);
+	return L4_thrid_t::create_irq(irq);
 }
 
 inline bool thrid_is_int(L4_thrid_t id)

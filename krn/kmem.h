@@ -18,14 +18,15 @@
 #include "wlibc_assert.h"
 
 /*
-static unsigned dprint_list(const char* fmt, ...)
+static void dprint_list(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void dprint_list(const char* fmt, ...)
 {
+	char buf[256];
 	va_list args;
 	va_start(args, fmt);
-	printk("list:  ");
-	vprintf(fmt, args);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	printk("list:  %s", buf);
 	va_end(args);
-	return 0;
 }
 */
 
@@ -568,24 +569,15 @@ public:
 		printk("Aspace::%s:  by, id=%u.\n", __func__, _id);
 	}
 
-	inline void set_current()
+	inline void set_current(bool force = false)
 	{
-		#if 1
+		// optimize switching from/to idle
 		bool need_set = _id != 0  &&  _id != _cur_mmu_ctxid; // not idle and not cur
-		#else
-		bool need_set = 1; // XXX:  think:  prev optimisation works incorrect for sw-irq in context.h
-		#endif
-		if (need_set)
+		if (force || need_set)
 		{
 			_pgtab.set_current();
 			_cur_mmu_ctxid = _id;
 		}
-	};
-
-	inline void set_current_force()
-	{
-		_pgtab.set_current();
-		_cur_mmu_ctxid = _id;
 	};
 
 private:

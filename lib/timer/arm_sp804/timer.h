@@ -58,8 +58,8 @@ enum
 	Ktmr = 0,
 };
 
-typedef void (*Timer_print_t)(const char* format, ...);
-
+typedef void (*Timer_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
+/*
 static inline unsigned irq_start(unsigned base_addr)
 {
 	(void)base_addr;
@@ -71,7 +71,7 @@ static inline unsigned num_timers(unsigned base_addr)
 	(void)base_addr;
 	return -1;
 }
-
+*/
 inline void timer_init(unsigned base_addr, Timer_print_t dprint)
 {
 	(void)base_addr;
@@ -129,7 +129,8 @@ inline void timer_stop(unsigned base_addr)
 	(void)base_addr;
 }
 
-inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock_hz, unsigned reload_usec, unsigned value_reg)
+inline uint64_t timer_usec_from_raw_value(uintptr_t base_addr, unsigned sysclock_hz,
+                                          unsigned reload_usec, unsigned value_reg)
 {
 	(void) reload_usec;  // use reload value from timer register
 	enum { Usec_per_sec = 1000*1000 };
@@ -157,12 +158,6 @@ inline void timer_irq_ack(unsigned base_addr)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
 	regs->tmr[Ktmr].intclr = 1;
-}
-
-// TODO support separate timer IRQs
-inline unsigned timer_irq_num(unsigned base_addr)
-{
-	return irq_start(base_addr);
 }
 
 inline void timer_dump(unsigned base_addr, Timer_print_t dprint)

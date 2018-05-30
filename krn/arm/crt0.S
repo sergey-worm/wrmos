@@ -4,6 +4,10 @@
 //
 //##################################################################################################
 
+#include "sys-config.h"
+
+.equ CPU_STACK_SZ, 0x400
+
 .equ  SVC_MODE,   0x13
 .equ  ABT_MODE,   0x17
 .equ  UND_MODE,   0x1b
@@ -135,9 +139,16 @@ cur_kentry_start:  .long -1 // kernel entry timer value for current thread
 cur_kexit_end:     .long -1 // kernel exit  timer value for current thread
 
 
-//--------------------------------------------------------------------------------------------------▫
+//--------------------------------------------------------------------------------------------------
+// bootstrap section - works at phys addresses
+.section .bootstrap
+
+// stacks for all CPUs
+.align 3  // sp must be 8-byte aligned (2^3)
+.space (CPU_STACK_SZ * Cfg_max_cpus)
+bootstrap_stack:
+
 // low-level entry point
-.section .bootstrap  // work at phys addresses
 .global _start
 _start:
 
@@ -148,9 +159,14 @@ _start:
 	// set SVC stack and go
 	msr cpsr, #(SVC_MODE | NO_IRQ | NO_FIQ)
 	ldr sp, =bootstrap_stack
+
+	// read CPU ID
+	mrc p15, 0, r0, c0, c0, 5   // get MPIDR
+	and r0, r0, #3              // lower 2 bits
+
+	// correct stack pointer for CPU
+	mov r1, #CPU_STACK_SZ
+	mul r1, r1, r0
+	sub sp, r1
+
 	bl bootstrap
-
-.align 3  // sp must be 8-byte aligned (2^3)
-.space 0x400
-bootstrap_stack:
-

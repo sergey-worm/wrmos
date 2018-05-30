@@ -33,18 +33,18 @@ inline size_t max(size_t a, size_t b) { return a > b ? a : b; }
 //--------------------------------------------------------------------------------------------------
 // helper funcs for work with log2sz
 //--------------------------------------------------------------------------------------------------
-inline size_t get_size(size_t log2sz)
+inline size_t get_size(unsigned log2sz)
 {
-	return 1 << log2sz;
+	return 1ul << log2sz;
 }
 
-inline size_t get_log2sz(size_t sz_bytes)
+inline unsigned get_log2sz(size_t sz_bytes)
 {
 	if (!sz_bytes)
 		return 0;
 
 	// find low bit
-	size_t log2sz = 0;
+	unsigned log2sz = 0;
 	size_t bytes = sz_bytes;
 	while (!(bytes & 0x1))
 	{
@@ -60,13 +60,13 @@ inline size_t get_log2sz(size_t sz_bytes)
 }
 
 // get low range
-inline size_t get_log2sz_low_range(size_t sz_bytes)
+inline unsigned get_log2sz_low_range(size_t sz_bytes)
 {
 	if (!sz_bytes)
 		return 0;
 
 	// find top bit
-	size_t log2sz = 0;
+	unsigned log2sz = 0;
 	for (int i=8*sizeof(size_t)-1; i>=0; --i)
 	{
 		if (sz_bytes >> i)
@@ -80,13 +80,13 @@ inline size_t get_log2sz_low_range(size_t sz_bytes)
 }
 
 // get top range
-inline size_t get_log2sz_top_range(size_t sz_bytes)
+inline unsigned get_log2sz_top_range(size_t sz_bytes)
 {
 	if (!sz_bytes)
 		return 0;
 
 	// find top bit
-	size_t log2sz = 0;
+	unsigned log2sz = 0;
 	for (int i=8*sizeof(size_t)-1; i>=0; --i)
 	{
 		if (sz_bytes >> i)

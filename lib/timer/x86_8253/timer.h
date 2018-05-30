@@ -67,7 +67,7 @@ inline void _timer_value(uint16_t val)
 	Proc::outb(Timer_io_ch0, val >> 8);
 }
 
-typedef void (*Timer_print_t)(const char* format, ...);
+typedef void (*Timer_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 inline void timer_init(uintptr_t base_addr, Timer_print_t dprint)
 {

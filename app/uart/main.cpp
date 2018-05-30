@@ -19,16 +19,17 @@
 // one-directional stream
 struct Stream_t
 {
-	Cbuf_t cbuf;                  // circular buffer
-	Wrm_sem_t sem;                // 'operation complete' semaphore
+	Cbuf_t    cbuf;               // circular buffer
+	Wrm_sem_t sem;                // 'irq received' semaphore
 };
 
 // driver data
 struct Driver_t
 {
-	Stream_t tx;
-	Stream_t rx;
-	addr_t ioaddr;
+	Stream_t  tx;                 //
+	Stream_t  rx;                 //
+	Wrm_mtx_t write_to_uart_mtx;  //
+	addr_t    ioaddr;             //
 };
 static Driver_t driver;
 
@@ -96,52 +97,108 @@ int wait_attach_msg(const char* thread_name, L4_thrid_t* client)
 
 // read from tx.cbuf and write to uart device
 // this func may be called from hw-thread and tx-thread
-void write_to_uart(int write_all)
+void write_to_uart()
 {
-	static unsigned fifo_sz = 0;
-	static Wrm_mtx_t mtx;
-	char buf[128];
-	if (!fifo_sz)
-	{
-		int rc = wrm_mtx_init(&mtx);
-		assert(!rc && "wrm_mtx_init() - failed");
+	//wrm_logd("--:  %s().\n", __func__);
 
-		fifo_sz = uart_fifo_size(driver.ioaddr);
-		assert(fifo_sz);
+	uart_tx_irq(driver.ioaddr, 0); // disable tx irq
+	unsigned written = 0;
 
-		if (fifo_sz > sizeof(buf))
-		{
-			wrm_logw("--:  fifo_sz/%u > bufsz/%zu, use %zu.\n", fifo_sz, sizeof(buf), sizeof(buf));
-			fifo_sz = sizeof(buf);
-		}
-	}
+	// NOTE:  The best way is write to UART FIFO char-by-char through uart_putc()
+	//        while fifo-is-not-full. But TopUART doesn't allow detect state
+	//        fifo-is-not-full. Therefore, we use uart_put_buf() and write FIFO_SZ
+	//        bytes. For most UARTs driver return FIFO_SZ=1 --> we will work
+	//        as uart_putc() while fifo-is-not-full. For TopUART FIFO_SZ=64, every
+	//        writing we put to UART FIFO_SZ bytes.
 
-	wrm_mtx_lock(&mtx);
+	#if 0 // char-by-char
+
+	// write to uart char-by-char
+	wrm_mtx_lock(&driver.write_to_uart_mtx);
 	while (1)
 	{
+		static char txchar = 0;
+		static int is_there_unsent = 0;
+
+		// read charecter from tx-buffer if need
+		if (!is_there_unsent)
+		{
+			unsigned read = driver.tx.cbuf.read(&txchar, 1);
+			if (!read)
+				break;
+			is_there_unsent = 1;
+		}
+
+		// write charecter to uart
+		int rc = uart_putc(driver.ioaddr, txchar);
+		if (rc < 0)
+		{
+			wrm_loge("--:  uart_put_buf() - rc=%d.\n", rc);
+			break;  // uart tx empty
+		}
+		if (!rc)
+		{
+			wrm_logd("--:  uart_tx_full, enable tx irq.\n");
+			uart_tx_irq(driver.ioaddr, 1);
+			break;
+		}
+		is_there_unsent = 0;
+		written++;
+	}
+	wrm_mtx_unlock(&driver.write_to_uart_mtx);
+
+	#else // put buf
+
+	unsigned fifo_sz = 0;
+	char buf[128];
+	fifo_sz = uart_fifo_size(driver.ioaddr);
+	assert(fifo_sz);
+	if (fifo_sz > sizeof(buf))
+	{
+		wrm_logw("--:  fifo_sz/%u > bufsz/%zu, use %zu.\n", fifo_sz, sizeof(buf), sizeof(buf));
+		fifo_sz = sizeof(buf);
+	}
+
+	// write to uart fifo-by-fifo
+	wrm_mtx_lock(&driver.write_to_uart_mtx);
+	while (1)
+	{
+		if (!(uart_status(driver.ioaddr) & Uart_status_tx_ready)  &&  !driver.tx.cbuf.empty())
+		{
+			//wrm_logd("--:  uart_tx_not_ready, data exist -> enable tx irq.\n");
+			uart_tx_irq(driver.ioaddr, 1);
+			break;
+		}
+
+		// read charecters from tx-buffer if need
 		unsigned read = driver.tx.cbuf.read(buf, fifo_sz);
 		//wrm_logd("--:  read from cbuf %d bytes.\n", read);
 
-		if (read < fifo_sz)  // no more data in tx.cbuf
-			uart_tx_irq(driver.ioaddr, 0);
-
 		if (!read)
-			break;
+			break; // no data anymore
 
+		// write charecter to uart
 		int rc = uart_put_buf(driver.ioaddr, buf, read);
+		if (rc < 0)
+		{
+			wrm_loge("--:  uart_put_buf() - rc=%d.\n", rc);
+			break;
+		}
+		written += rc;
 		if (read != (unsigned) rc)
 		{
-			wrm_loge("--:  failed to tx to device, wr=%u, lost %u bytes.\n", read, read - rc);
-			break;  // uart tx empty
-		}
-
-		if (!write_all)
+			wrm_loge("--:  uart_put_buf() - wr=%u, lost %u bytes.\n", read, read - rc);
 			break;
+		}
 	}
-	wrm_mtx_unlock(&mtx);
+	wrm_mtx_unlock(&driver.write_to_uart_mtx);
+
+	#endif
+
+	//wrm_logd("--:  written=%u.\n", written);
 }
 
-size_t put_to_tx_buf(const char* buf, unsigned sz)
+size_t put_to_txbuf(const char* buf, unsigned sz)
 {
 	// put line by line and add '\r'
 	unsigned written = 0;
@@ -229,7 +286,7 @@ int tx_thread(int unused)
 		//	sitem.pointer(), sitem.length(), tx_buf, sitem.length(), (char*)sitem.pointer());
 
 		((char*)sitem.pointer())[sitem.length()] = '\0'; // add terminator
-		unsigned written = put_to_tx_buf((char*)sitem.pointer(), sitem.length());
+		unsigned written = put_to_txbuf((char*)sitem.pointer(), sitem.length());
 
 		if (written != sitem.length())
 		{
@@ -241,15 +298,12 @@ int tx_thread(int unused)
 
 		if (written)
 		{
-			if (uart_fifo_size(driver.ioaddr) == 1) // WA:  detect qemu uarts
-				write_to_uart(1);                   // qemu uarts
-			else
-				uart_tx_irq(driver.ioaddr, 1);      // hw uart
+			write_to_uart();
 		}
 
 		// send reply to client
 		tag.propagated(false);
-		tag.ipc_label(0);           // ?
+		tag.ipc_label(0);
 		tag.untyped(2);
 		tag.typed(0);
 		utcb->mr[0] = tag.raw();
@@ -348,6 +402,119 @@ int rx_thread(int unused)
 	return 0;
 }
 
+void read_from_uart()
+{
+	char buf[64];
+	unsigned read = 0;
+	while (1)
+	{
+		// read data from uart
+		unsigned rd = 0;
+		char ch = 0;
+		while (rd < sizeof(buf)  &&  (ch = uart_getc(driver.ioaddr)))
+			buf[rd++] = ch;
+
+		//wrm_logd("hw:  read from uart %d bytes.\n", rc);
+		//wrm_logd("hw:  rx(%u):  '%.*s' (rx=%u, tx=%u all=%u)\n",
+		//	rc, rc, buf, cnt_rx, cnt_tx, cnt_all);
+
+		read += rd;
+		if (!rd)
+			break;
+
+		// write data to rx-buffer
+		unsigned written = driver.rx.cbuf.write(buf, rd);
+		if (written != rd)
+		{
+			wrm_loge("hw:  rx_buf full, lost %u bytes.\n", rd - written);
+			break;
+		}
+
+		//wrm_logi("post rx sem.\n");
+		int rc = wrm_sem_post(&driver.rx.sem);
+		if (rc)
+			wrm_loge("hw:  wrm_sem_post(rx.sem) - rc=%d.\n", rc);
+	}
+
+	if (!read)
+		wrm_loge("hw:  no data for read in uart.\n");
+}
+
+void irq_thread(const char* uart_dev_name)
+{
+	// rename main thread
+	memcpy(&l4_utcb()->tls[0], "u-hw", 4);
+
+	// attach to IRQ
+	unsigned intno = -1;
+	int rc = wrm_dev_attach_int(uart_dev_name, &intno);
+	wrm_logi("attach_int:  dev=%s, irq=%u.\n", uart_dev_name, intno);
+	if (rc)
+	{
+		wrm_loge("wrm_dev_attach_int() - rc=%d.\n", rc);
+		return;
+	}
+
+	uart_rx_irq(driver.ioaddr, 1);
+
+	unsigned icnt_rx = 0;
+	unsigned icnt_tx = 0;
+	unsigned icnt_all = 0;
+	unsigned icnt_nil = 0;
+
+	// wait interrupt loop
+	while (1)
+	{
+		// wait interrupt
+		//wrm_logd("hw:  wait interrupt ... (irq: rx/tx/all/nil=%u/%u/%u/%u).\n",
+		//	icnt_rx, icnt_tx, icnt_all, icnt_nil);
+
+		rc = wrm_dev_wait_int(intno, Uart_need_ack_irq_before_reenable);
+		assert(!rc);
+		icnt_all++;
+
+		unsigned loop_cnt = 0;
+		while (1)
+		{
+			int status = uart_status(driver.ioaddr);
+
+			int tx_ready = !!(status & Uart_status_tx_ready);
+			int rx_ready = !!(status & Uart_status_rx_ready);
+			int tx_irq   = !!(status & Uart_status_tx_irq);
+			int rx_irq   = !!(status & Uart_status_rx_irq);
+
+			//wrm_logd("hw:  status:  loop=%u:  ready_rx/tx=%d/%d, irq_rx/tx=%d/%d.\n",
+			//	loop_cnt, rx_ready, tx_ready, rx_irq, tx_irq);
+
+			if (!rx_irq && !tx_irq)
+			{
+				// we got real irq but UART hasn't interrupt inside int_status register
+				//wrm_loge("hw:  no irq:  loop=%u:  ready_rx/tx=%d/%d, irq_rx/tx=%d/%d.\n",
+				//	loop_cnt, rx_ready, tx_ready, rx_irq, tx_irq);
+				icnt_nil++;
+				break;
+			}
+
+			if (rx_irq)
+				icnt_rx++;
+
+			if (tx_irq)
+				icnt_tx++;
+
+			if (rx_ready)
+				read_from_uart();
+
+			if (tx_ready)
+				write_to_uart();
+
+			loop_cnt++;
+			int need_check_status = uart_clear_irq(driver.ioaddr);
+			if (!need_check_status)
+				break;
+		}
+	}
+}
+
 int main(int argc, const char* argv[])
 {
 	wrm_logi("hello.\n");
@@ -357,11 +524,6 @@ int main(int argc, const char* argv[])
 		wrm_logi("arg[%d] = %s.\n", i, argv[i]);
 
 	wrm_logi("myid=%u.\n", l4_utcb()->global_id().number());
-
-	// FIXME:  get app memory from Alpha
-	static uint8_t memory [4*Cfg_page_sz] __attribute__((aligned(4*Cfg_page_sz)));
-	wrm_mpool_add(L4_fpage_t::create((addr_t)memory, sizeof(memory), Acc_rw));
-	// ~FIXME
 
 	// map IO
 	const char* uart_dev_name = argc>=2 ? argv[1] : "";
@@ -388,6 +550,13 @@ int main(int argc, const char* argv[])
 		return -2;
 	}
 
+	rc = wrm_mtx_init(&driver.write_to_uart_mtx);
+	if (rc)
+	{
+		wrm_loge("wrm_mtx_init(write_to_uart_mtx) - rc=%d.", rc);
+		return -3;
+	}
+
 	// I do not known sys_freq.
 	// Do not init, I hope uart was initialized by kernel.
 	// uart_init(ioaddr, 115200, 40*1000*1000/*?*/);
@@ -398,10 +567,14 @@ int main(int argc, const char* argv[])
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t txid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp.addr(), tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	rc = wrm_thread_create(utcb_fp, tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
 	                      "u-tx", Wrm_thr_flag_no, &txid);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, txid.number());
-	assert(!rc && "failed to create tx thread");
+	if (rc)
+	{
+		wrm_loge("wrm_thread_create(tx) - rc=%d.", rc);
+		return -4;
+	}
 
 	// create rx thread
 	stack_fp = wrm_mpool_alloc(Cfg_page_sz);
@@ -409,81 +582,17 @@ int main(int argc, const char* argv[])
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t rxid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp.addr(), rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	rc = wrm_thread_create(utcb_fp, rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
 	                      "u-rx", Wrm_thr_flag_no, &rxid);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, rxid.number());
-	assert(!rc && "failed to create rx thread");
-
-	// device thread
-
-	// rename main thread
-	memcpy(&l4_utcb()->tls[0], "u-hw", 4);
-
-	// attach to IRQ
-	unsigned intno = -1;
-	rc = wrm_dev_attach_int(uart_dev_name, &intno);
 	if (rc)
 	{
-		wrm_loge("wrm_dev_attach_int() - rc=%d.\n", rc);
-		return -1;
+		wrm_loge("wrm_thread_create(rx) - rc=%d.\n", rc);
+		return -5;
 	}
-	wrm_logi("attach_int:  dev=%s, irq=%u.\n", uart_dev_name, intno);
 
-
-	uart_rx_irq(ioaddr, 1);
-	//uart_tx_irq(ioaddr, 1);
-
-	char buf[256];
-
-	unsigned cnt_rx = 0;
-	unsigned cnt_tx = 0;
-	unsigned cnt_all = 0;
-
-	// wait interrupt loop
-	while (1)
-	{
-		// wait interrupt
-		//wrm_logd("hw:  wait interrupt ... (rx=%u, tx=%u all=%u).\n", cnt_rx, cnt_tx, cnt_all);
-		rc = wrm_dev_wait_int(intno, 1);  // 1 - Need_ack_befor_reenable
-		assert(!rc);
-		cnt_all++;
-
-		int status = uart_status(ioaddr);
-
-		//uart_ack(ioaddr); // ???
-
-		//if (!status) // !status - it is normal for real hw, not qemu
-		//	wrm_loge("hw:  status:  rx=%d, tx=%d.\n", status & Uart_status_rx_full, status & Uart_status_tx_empty);
-
-		if (status & Uart_status_rx_full)
-		{
-			cnt_rx++;
-			rc = uart_get_buf(ioaddr, buf, sizeof(buf));
-			//wrm_logd("hw:  read from uart %d bytes.\n", rc);
-			if (rc > 0)
-			{
-				//wrm_logd("hw:  rx(%u):  '%.*s' (rx=%u, tx=%u all=%u)\n", rc, rc, buf, cnt_rx, cnt_tx, cnt_all);
-				unsigned written = driver.rx.cbuf.write(buf, rc);
-				if (written != (unsigned) rc)
-					wrm_loge("hw:  rx_buf full, lost %u bytes.\n", rc - written);
-
-				//wrm_logi("post rx sem.\n");
-				rc = wrm_sem_post(&driver.rx.sem);
-				if (rc)
-					wrm_loge("hw:  wrm_sem_post(rx.sem) - rc=%d.\n", rc);
-			}
-			else
-			{
-				wrm_loge("hw:  failed to rx from device.\n");
-			}
-		}
-
-		if (status & Uart_status_tx_empty)
-		{
-			cnt_tx++;
-			write_to_uart(0);
-		}
-	}
+	irq_thread(uart_dev_name);
+	wrm_loge("return from app uart - something going wrong.\n");
 
 	return 0;
 }

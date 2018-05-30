@@ -8,6 +8,7 @@
 #define CBUF_H
 
 #include "sys_utils.h"
+#include "wlibc_assert.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -44,6 +45,11 @@ public:
 		_rp = 0;
 	}
 
+	int empty()
+	{
+		return !!(_wp == _rp);
+	}
+
 	// allowed overwriting old data
 	// be careful for multithreadung
 	size_t overwrite(const char* buf, size_t len)
@@ -76,7 +82,7 @@ public:
 
 			if (l1 != len)
 			{
-				assert(!_wp);
+				wassert(!_wp);
 				size_t l2 = len - l1;
 				memcpy(_buf, buf + l1, l2);
 				over = (_wp + l2) >= _rp;
@@ -127,7 +133,7 @@ public:
 			_wp = (_wp + bytes) == _sz  ?  0  :  (_wp + bytes);
 			if (bytes != len)
 			{
-				assert(!_wp);
+				wassert(!_wp);
 				size_t l = min(len - bytes, _rp - 1);
 				memcpy(_buf, buf + bytes, l);
 				_wp = l;
@@ -158,7 +164,7 @@ public:
 			_rp = (_rp + bytes) == _sz  ?  0  :  (_rp + bytes);
 			if (bytes != len)
 			{
-				assert(!_rp);
+				wassert(!_rp);
 				size_t l = min(len - bytes, _wp);
 				memcpy(buf + bytes, _buf, l);
 				_rp = l;

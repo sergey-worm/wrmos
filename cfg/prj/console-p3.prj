@@ -1,0 +1,29 @@
+####################################################################################################
+#
+#  vi: set ft=make:
+#
+#  Specific project params.
+#
+####################################################################################################
+
+# platform parameters
+plt_file         = $(wrmdir)/cfg/plt/sparc-p3.plt
+
+# toolchain
+gccprefix        = sparc-linux-
+
+# debug flags
+usr_lib_dbg      = 1
+usr_krn_dbg      = 1
+usr_krn_log      = 1
+usr_app_dbg      = 1
+usr_ldr_dbg      = 1
+
+# files to put in the ramfs
+usr_ramfs        = config.alph:$(wrmdir)/cfg/alph/console.alph
+usr_ramfs       += uart.elf:$(blddir)/app/uart/uart.elf
+usr_ramfs       += console.elf:$(blddir)/app/console/console.elf
+usr_ramfs       += chello.elf:$(blddir)/app/chello/chello.elf
+
+# base file to set all project params
+include $(wrmdir)/cfg/base.cfg

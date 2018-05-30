@@ -15,7 +15,7 @@ baseflags  += -fno-builtin # don't use builtin printf()
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
-#else
+else
   baseflags += -DNDEBUG
 endif
 

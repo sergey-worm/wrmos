@@ -9,18 +9,19 @@
 
 #include "timer.h"
 #include "wlibc_assert.h"
+#include "sys_types.h"
 
 class Timer
 {
-	static uintptr_t _addr;         // device base address
-	static unsigned  _sysclock_hz;  // system clock
-	static unsigned  _period_usec;  // current reload value
+	static addr_t   _addr;         // device base address
+	static unsigned _sysclock_hz;  // system clock
+	static unsigned _period_usec;  // current reload value
 
 public:
 
-	typedef void (*Print_t)(const char* format, ...);
+	typedef void (*Print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
-	static inline void init(uintptr_t base_addr, unsigned sysclock_hz, Print_t dprint = 0)
+	static inline void init(addr_t base_addr, unsigned sysclock_hz, Print_t dprint = 0)
 	{
 		_addr = base_addr;
 		_sysclock_hz = sysclock_hz;
@@ -63,13 +64,13 @@ public:
 		return timer_value_usec(_addr, _sysclock_hz, _period_usec);
 	}
 
-	static inline unsigned raw_value()
+	static inline uint64_t raw_value()
 	{
 		wassert(_addr != -1);
 		return timer_raw_value(_addr);
 	}
 
-	static inline uint64_t usec_from_raw_value(unsigned val)
+	static inline uint64_t usec_from_raw_value(uint64_t val)
 	{
 		wassert(_addr != -1);
 		return timer_usec_from_raw_value(_addr, _sysclock_hz, _period_usec, val);

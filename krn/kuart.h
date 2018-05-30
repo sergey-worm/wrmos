@@ -8,6 +8,7 @@
 #define KUART_H
 
 #include "sys_types.h"
+#include "wlibc_assert.h"
 
 #define UART_WITH_VIDEO /* for x86 video output */
 #include "uart.h"
@@ -28,15 +29,16 @@ public:
 
 	static inline void putch(int c)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		int tx_irq_on = uart_tx_irq(_addr, 0);
 		while (!uart_putc(_addr, c));
+		while (!uart_is_tx_done(_addr));
 		uart_tx_irq(_addr, tx_irq_on);
 	}
 
 	static inline int getch()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return uart_getc(_addr);
 	}
 

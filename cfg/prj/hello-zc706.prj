@@ -1,0 +1,27 @@
+####################################################################################################
+#
+#  vi: set ft=make:
+#
+#  Specific project params.
+#
+####################################################################################################
+
+# platform parameters
+plt_file         = $(wrmdir)/cfg/plt/arm-zynq-zc706.plt
+
+# toolchain
+gccprefix        = arm-linux-
+
+# debug flags
+usr_lib_dbg      = 1
+usr_krn_dbg      = 1
+usr_krn_log      = 1
+usr_app_dbg      = 1
+usr_ldr_dbg      = 1
+
+# files to put in the ramfs
+usr_ramfs        = config.alph:$(wrmdir)/cfg/alph/hello.alph
+usr_ramfs       += hello.elf:$(blddir)/app/hello/hello.elf
+
+# base file to set all project params
+include $(wrmdir)/cfg/base.cfg

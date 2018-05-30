@@ -4,16 +4,23 @@
 //
 //##################################################################################################
 
-#ifndef UART_H
-#define UART_H
+#ifndef PL011_UART_H
+#define PL011_UART_H
 
 #include <stdint.h>
 
 enum
 {
-	Uart_status_tx_empty = 1 << 1,
-	Uart_status_rx_full  = 1 << 2,
+	Uart_status_tx_ready = 1 << 1,
+	Uart_status_rx_ready = 1 << 2,
+	Uart_status_tx_irq   = 1 << 3,
+	Uart_status_rx_irq   = 1 << 4,
 
+	Uart_need_ack_irq_before_reenable = 1
+};
+
+enum
+{
 	// interrupt bits
 	Irq_overrun_err = 1 << 10,  // overrun error
 	Irq_break_err   = 1 <<  9,  // break error
@@ -120,37 +127,51 @@ inline int uart_rx_irq(unsigned long base_addr, int enable)
 	return (mask & Irq_rx) ? 1 : 0;
 }
 
-inline unsigned uart_fifo_size(unsigned long base_addr)
-{
-	// TODO
-	(void)base_addr;
-	return 1;  // only holding register are available, sz = 1
-}
-
-// return Uart_status_tx_empty or Uart_status_rx_full
+// return tx/rx ready and tx/rx irq-pending flags
 inline int uart_status(unsigned long base_addr)
 {
 	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
-	unsigned long status = regs->ris;
+	uint32_t flags = regs->fr;
 	int res = 0;
-	res |= (status & Irq_rx) ? Uart_status_rx_full : 0;
-	res |= (status & Irq_tx) ? Uart_status_tx_empty : 0;
+	res |= !(flags & Flag_rx_empty) ? Uart_status_rx_ready : 0;
+	res |= !(flags & Flag_tx_full)  ? Uart_status_tx_ready : 0;
+	uint32_t istatus = regs->mis;
+	res |= (istatus & Irq_rx) ? Uart_status_rx_irq : 0;
+	res |= (istatus & Irq_tx) ? Uart_status_tx_irq : 0;
 	return res;
 }
 
-inline void uart_ack(unsigned long base_addr)
+// clear interrupt status flags, if need re-check status - return 1, else - 0
+inline int uart_clear_irq(unsigned long base_addr)
 {
 	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
-	regs->icr = 0x7ff;  // clear pending interrupts
+	regs->icr = 0x7ff;
+	return !!(regs->mis & (Irq_rx | Irq_tx));
+}
+
+// if send operation is complete - return 1, else - 0
+inline int uart_is_tx_done(unsigned long base_addr)
+{
+	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
+	return !!(regs->fr & Flag_tx_empty);
 }
 
 // return error code (<0), or written bytes number (0 or 1)
 inline int uart_putc(unsigned long base_addr, int c)
 {
 	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
-	if (regs->fr & (Flag_tx_full))  // is uart ready to transmit ?
+	if (regs->fr & (Flag_tx_full))
 		return 0;
 	regs->dr = c;
+	return 1;
+}
+
+// need only for working with uart_put_buf(),
+// value 1 is mean driver will put to FIFO char-by-char,
+// it is good for this driver
+inline unsigned uart_fifo_size(unsigned long base_addr)
+{
+	(void) base_addr;
 	return 1;
 }
 
@@ -161,7 +182,7 @@ inline int uart_put_buf(unsigned long base_addr, const char* buf, unsigned sz)
 	if (!sz)
 		return 0;
 	unsigned written = 0;
-	if (!(regs->fr & Flag_tx_full)  &&  written < sz) // is uart ready to transmit ?
+	if (!(regs->fr & Flag_tx_full)  &&  written < sz)
 		regs->dr = buf[written++];
 	return written;
 }
@@ -170,22 +191,9 @@ inline int uart_put_buf(unsigned long base_addr, const char* buf, unsigned sz)
 inline int uart_getc(unsigned base_addr)
 {
 	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
-	if (regs->fr & Flag_rx_empty)  // is data ready ?
+	if (regs->fr & Flag_rx_empty)
 		return 0;
 	return regs->dr;
 }
 
-inline int uart_get_buf(unsigned long base_addr, char* buf, unsigned sz)
-{
-	volatile Pl011_regs_t* regs = (Pl011_regs_t*)base_addr;
-	if (!sz)
-		return 0;
-	unsigned read = 0;
-	while (!(regs->fr & Flag_rx_empty)  &&  read < sz)  // is data ready ?
-	{
-		buf[read++] = regs->dr;
-	}
-	return read;
-}
-
-#endif // UART_H
+#endif // PL011_UART_H

@@ -59,7 +59,7 @@ enum
 	Ktmr                =  0,       // number of timer for kernel purpose
 };
 
-typedef void (*Timer_print_t)(const char* format, ...);
+typedef void (*Timer_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 static inline unsigned irq_start(uintptr_t base_addr)
 {
@@ -153,12 +153,6 @@ inline void timer_irq_ack(uintptr_t base_addr)
 	#else
 	regs->timer[Ktmr].control |= Control_ip;
 	#endif
-}
-
-// TODO support separate timer IRQs
-inline unsigned timer_irq_num(uintptr_t base_addr)
-{
-	return irq_start(base_addr);
 }
 
 inline void timer_dump(uintptr_t base_addr, Timer_print_t dprint)

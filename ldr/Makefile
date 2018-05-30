@@ -19,6 +19,7 @@ cxxflags    += -fno-exceptions
 incflags    := -I$(cfgdir)
 incflags    += -I$(arch)
 incflags    += -I$(wrmdir)/lib/uart/$(uart)
+incflags    += -I$(wrmdir)/lib/intc/$(intc)
 incflags    += -I$(wrmdir)/lib/elfloader
 incflags    += -I$(wrmdir)/lib/list
 incflags    += -I$(wrmdir)/lib/l4/inc
@@ -34,6 +35,7 @@ asflags     :=
 cflags      :=
 ldaddr_file := $(cfgdir)/bootloader-load-addr.h
 cc_deps     := $(ldaddr_file) # add cc-dependence because crt1.cc include "bootloader-load-addr.h"
+cpp_deps    := $(ramfs_files) # add cpp-dependence because main.cpp needs to update build timestamp
 
 ifeq ($(dbg),1)
   baseflags += -g

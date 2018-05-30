@@ -40,11 +40,11 @@ class App_map_t
 {
 	struct region_t
 	{
-		addr_t remote;        // vaddr in remote aspace
-		size_t sz;            // size in bytes, may not be aligned
-		acc_t  acc;           // access bits
-		addr_t local;         // vaddr in local aspace, if 0 --> need allocate before using
-		addr_t local_origin;  // if !=0 --> copy data from 'local_origin' to 'local' after allocating
+		addr_t remote;         // vaddr in remote aspace
+		size_t sz;             // size in bytes, may not be aligned
+		acc_t  acc;            // access bits
+		addr_t local;          // vaddr in local aspace, if 0 --> need allocate before using
+		addr_t local_origin;   // if !=0 --> copy data from 'local_origin' to 'local' after allocating
 
 		//explicit region_t(addr_t r, size_t s, unsigned a) :
 		//	remote(r), sz(s), acc(a), local(0), local_origin(0)  {}
@@ -55,30 +55,30 @@ class App_map_t
 		addr_t location()    { return local; } 
 	};
 
-	typedef list_t <region_t, 0/*8*1024*/> regions_t;
-	regions_t  _regions;     // memory regions
-	L4_thrid_t _owner;       // global thread ID
-	addr_t     _entry;       // entry point
-	addr_t     _stack_ua;    // stack area address
-	size_t     _stack_sz;    // stack area size
-	addr_t     _sp;          // initial stack pointer
-	L4_fpage_t _kip;         // kip area
-	L4_fpage_t _utcb;        // utcb area
-	word_t     _name;        // 4 chars
+	typedef list_t <region_t, 0> regions_t;
+	regions_t  _regions;       // memory regions
+	L4_thrid_t _owner;         // global thread ID
+	addr_t     _entry;         // entry point
+	addr_t     _stack_ua;      // stack area address
+	size_t     _stack_sz;      // stack area size
+	addr_t     _sp;            // initial stack pointer
+	L4_fpage_t _kip;           // kip area
+	L4_fpage_t _utcb;          // utcb area
+	word_t     _name;          // 4 chars
 
 	// aspaces data
 	unsigned _max_aspaces;     // max aspaces in app
 	unsigned _aspaces_in_use;  // aspaces in use
 
 	// thread IDs data
-	unsigned _max_threads;   // max threads in app
-	uint32_t _busy_thrno;    // busy bits: 0 - free, 1 - busy
+	unsigned _max_threads;     // max threads in app
+	uint32_t _busy_thrno;      // busy bits: 0 - free, 1 - busy
 	enum { Max_threads_limit = 8 * sizeof(_busy_thrno) };
 
-	// max prio
+	// config params
 	uint8_t _max_prio;
-
-	bool _fpu;
+	bool    _fpu;
+	int     _malloc_strategy;
 
 public:
 
@@ -100,14 +100,15 @@ public:
 		return *this;
 	}
 
-	void entry(addr_t v)            { _entry = v; }
+	void entry(addr_t v)            { _entry = v;                       }
 	void kip(L4_fpage_t v)          { _kip   = v;      add_vspace(v);   }
 	void utcb(L4_fpage_t v)         { _utcb  = v;      add_vspace(v);   }
-	void name(const char* v)        { _name = *(word_t*)v; }
-	void max_aspaces(unsigned v)    { _max_aspaces = v; }
+	void name(const char* v)        { _name = *(word_t*)v;              }
+	void max_aspaces(unsigned v)    { _max_aspaces = v;                 }
 	void max_threads(unsigned v)    { _max_threads = v; assert(v < Max_threads_limit); }
 	void max_prio(unsigned v)       { _max_prio = v;                    }
 	void fpu(bool v)                { _fpu = v;                         }
+	void malloc_strategy(int v)     { _malloc_strategy = v;             }
 
 	void stack(addr_t a, size_t s)
 	{
@@ -117,18 +118,19 @@ public:
 		add_vspace(a, s, Acc_rw);
 	}
 
-	L4_thrid_t  owner()       const { return _owner; }
-	addr_t      entry()       const { return _entry; }
-	addr_t      stack_ua()    const { return _stack_ua; }
-	addr_t      sp()          const { return _sp;    }
-	L4_fpage_t  kip()         const { return _kip;   }
-	L4_fpage_t  utcb()        const { return _utcb;  }
-	word_t      name()        const { return _name;  }
-	const char* name_str()    const { return (char*)&_name;  } // no null terminator !
-	unsigned    max_aspaces() const { return _max_aspaces; }
-	unsigned    max_threads() const { return _max_threads; }
-	uint8_t     max_prio()    const { return _max_prio;  }
-	bool        fpu()         const { return _fpu;  }
+	L4_thrid_t  owner()           const { return _owner;           }
+	addr_t      entry()           const { return _entry;           }
+	addr_t      stack_ua()        const { return _stack_ua;        }
+	addr_t      sp()              const { return _sp;              }
+	L4_fpage_t  kip()             const { return _kip;             }
+	L4_fpage_t  utcb()            const { return _utcb;            }
+	word_t      name()            const { return _name;            }
+	const char* name_str()        const { return (char*)&_name;    } // no null terminator !
+	unsigned    max_aspaces()     const { return _max_aspaces;     }
+	unsigned    max_threads()     const { return _max_threads;     }
+	uint8_t     max_prio()        const { return _max_prio;        }
+	bool        fpu()             const { return _fpu;             }
+	int         malloc_strategy() const { return _malloc_strategy; }
 
 	void dump()
 	{
@@ -191,6 +193,7 @@ public:
 
 private:
 
+	// TODO:  support binary search in sorted list and use it here
 	// find memory region that contents [va,sz,acc]
 	regions_t::iter_t find(addr_t rem_va, size_t sz, acc_t acc)
 	{
@@ -201,36 +204,15 @@ private:
 		return _regions.end();
 	}
 
-	// find free memory for app args
-	// free memory may be only once in .data section
-	bool find_remote_free_space(addr_t* rem_va, size_t* rem_sz)
-	{
-		*rem_va = 0;
-		*rem_sz = 0;
-		for (regions_t::iter_t it=_regions.begin(); it!=_regions.end(); ++it)
-		{
-			if (!is_aligned(it->sz, Cfg_page_sz)  &&  it->acc == Acc_rw) // FIXME:  ro ?
-			{
-				*rem_va = it->remote_end();
-				*rem_sz = align_up(it->remote_end(), Cfg_page_sz) - it->remote_end();
-				it->sz += *rem_sz;
-				return true;
-			}
-		}
-		return false;
-	}
-
 public:
 
 	// add remote aspace
+	// 'rem_va' and 'sz' may not be page aligned, 'sz' may be 0
 	void add_vspace(addr_t rem_va, size_t sz, acc_t acc)
 	{
 		//wrm_logd("%s() - rem_va=0x%lx, sz=0x%zx, acc=%d.\n", __func__, rem_va, sz, acc);
 		assert(rem_va);
 		assert(acc);
-		assert(sz);
-		assert(is_aligned(rem_va, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
 		if (!sz)
 			return;
 		regions_t::iter_t reg = find(rem_va, sz, Acc_nil); // check crossing
@@ -245,6 +227,7 @@ public:
 		add_vspace(fp.addr(), fp.size(), fp.access());
 	}
 
+	// remove incoming region and add 2 or 3 new regions, return requested region
 	regions_t::iter_t split_to_smaller_regions(regions_t::iter_t reg, addr_t rem_va, addr_t sz)
 	{
 		//wrm_logw("%s:  split reg:  rem=0x%lx, sz=0x%lx, acc=%d, loc=0x%lx, loc_orig=0x%lx.\n",
@@ -255,7 +238,7 @@ public:
 		size_t sz_after  = tails_in_common_pg ? 0 : reg->remote_end() - round_pg_up(rem_va + sz);
 		size_t sz_middle = reg->sz - sz_before - sz_after;
 
-		//wrm_logw("%s:  split at sizes:  0x%lx, 0x%lx, 0x%lx.\n", __func__, sz_before, sz_middle, sz_after);
+		//wrm_logw("%s:  split at sizes:  0x%zx, 0x%zx, 0x%zx.\n", __func__, sz_before, sz_middle, sz_after);
 
 		assert((sz_before + sz_middle + sz_after) == reg->sz);
 
@@ -283,25 +266,33 @@ public:
 		}
 
 		_regions.erase(reg);
+		assert(new_reg->remote == round_pg_down(rem_va));
 		return new_reg;
 	}
 
+public:
+
 	// find local_va for remote_va
 	// allocate memory from pool if need
-	addr_t location(addr_t rem_va, addr_t sz, acc_t acc, acc_t* acc_max = 0)
+	addr_t get_location(addr_t rem_va, addr_t sz, acc_t acc, acc_t* acc_max = 0)
 	{
-		//wrm_logw("%s:  request:  0x%lx - 0x%lx, sz=0x%lx, acc=%d.\n",
+		//wrm_logd("%s:  req:  0x%lx - 0x%lx, sz=0x%lx, acc=%d.\n",
 		//	__func__, rem_va, rem_va + sz, sz, acc);
 
 		regions_t::iter_t reg = find(rem_va, sz, acc);
 		if (reg != _regions.end())
 		{
-			//wrm_logw("%s:  found:    0x%lx - 0x%lx, sz=0x%lx, acc=%d, loc=0x%lx, loc_orig=0x%lx.\n",
+			//wrm_logw("%s:  found:    0x%lx - 0x%lx, sz=0x%zx, acc=%d, loc=0x%lx, loc_orig=0x%lx.\n",
 			//	__func__, reg->remote, reg->remote_end(), reg->sz, reg->acc, reg->local, reg->local_origin);
 			assert(rem_va >= reg->remote  &&  (rem_va + sz) <= reg->remote_end());
 			addr_t local = reg->location();
 			if (!local)
 			{
+				/* TODO:  implement me
+				if (malloc_strategy() == Wrm_app_cfg_t::Malloc_on_startup)
+					wrm_loge("%s:  Malloc_on_startup but no location.\n", __func__);
+				*/
+
 				// split to smaller regions if need
 				if (sz < reg->sz)
 					reg = split_to_smaller_regions(reg, rem_va, sz);
@@ -328,26 +319,49 @@ public:
 		return 0;
 	}
 
+	// do not create new regions, just set location for existing
 	// incomming region may contents many existing regions
 	void set_location_from_elf(addr_t rem_va, size_t sz, addr_t location)
 	{
-		assert(is_aligned(rem_va, Cfg_page_sz));
-		assert(is_aligned(sz, Cfg_page_sz));
-		assert(is_aligned(location, Cfg_page_sz));
-		assert(rem_va);
-		assert(sz);
-		assert(location);
+		//wrm_logd("%s:  rem=0x%lx, sz=0x%zx, loc=0x%lx.\n", __func__, rem_va, sz, location);
+
+		// set location
 		addr_t rem_end = rem_va + sz;
 		for (regions_t::iter_t it=_regions.begin(); it!=_regions.end(); ++it)
 		{
 			if (it->remote >= rem_va  &&  it->remote_end() <= rem_end)
 			{
+				assert(is_pg_aligned(rem_va));
+				//assert(is_pg_aligned(sz));  // sz may not be page aligned
+				assert(is_pg_aligned(location));
+				assert(rem_va);
+				assert(sz);
+				assert(location);
+
 				size_t offset = it->remote - rem_va;
 				addr_t local = location + offset;
 
 				if (it->need_relocate()) // writable region, will allocate later
 				{
-					it->local_origin = local;
+					if (0 && malloc_strategy() == Wrm_app_cfg_t::Malloc_on_startup)
+					{
+						// TODO:  implement me
+						assert(it->sz == Cfg_page_sz);
+						// allocate memory
+						L4_fpage_t fp = wrm_mpool_alloc(it->sz);
+						if (fp.is_nil())
+							panic("%s:  no mem.\n", __func__);
+						it->local = fp.addr();
+
+						// initialize if need
+						if (local)
+							memcpy((void*)it->local, (void*)local, it->sz);
+					}
+					else
+					{
+						// allocating will be later on pagefault
+						it->local_origin = local;
+					}
 				}
 				else
 				{
@@ -357,18 +371,30 @@ public:
 		}
 	}
 
+	// add vspace and set location for it, sz may be > Cfg_page_sz
+	// return error code
+	int add_location(addr_t rem_va, L4_fpage_t location)
+	{
+		//wrm_logw("%s:  rem=0x%lx, loc=0x%lx, sz=0x%lx.\n",
+		//	__func__, rem_va, location.addr(), location.size());
+
+		regions_t::iter_t reg = find(rem_va, location.size(), Acc_nil); // check crossing
+		if (reg != _regions.end())
+		{
+			wrm_loge("%s:  region (va=0x%lx, sz=0x%lx) cross existing region.\n",
+				__func__, rem_va, location.size());
+			return -1;
+		}
+		_regions.push_back(region_t(rem_va, location.size(), location.access()));
+		region_t& r = _regions.back();
+		r.local = location.addr();
+		return 0;
+	}
+
 	// add app arguments to memory map
 	void args(const char* name, const Wrm_app_cfg_t::arg_t* args, addr_t args_page_rem_va)
 	{
 		assert(_sp && "Stack is absent.");
-
-		// TODO:
-		// 1. add to link.lds.S vars:  _text_unused_start/end
-		//                             _rodata_unused_start/end
-		//                             _data_unused_start/end
-		// 2. use this information in App_map
-		// 3. put args at .rodata (not .data)
-		// ~TODO
 
 		// locate args in memory:
 		//   arg1_ptr, arg2_ptr, ... , argN_ptr
@@ -383,37 +409,18 @@ public:
 			arg++;
 		}
 
-	// alloc memory for args_page_rem_va
-	L4_fpage_t fp = wrm_mpool_alloc(Cfg_page_sz);
-	assert(!fp.is_nil());
-	if (fp.is_nil())
-		panic("DEBUG ME");
-	add_vspace(args_page_rem_va, Cfg_page_sz, Acc_r);
-	set_location_from_elf(args_page_rem_va, Cfg_page_sz, fp.addr());
+		// alloc memory for args_page_rem_va
+		L4_fpage_t fp = wrm_mpool_alloc(Cfg_page_sz);
+		assert(!fp.is_nil());
+		if (fp.is_nil())
+			panic("DEBUG ME");
+		add_location(args_page_rem_va, fp);
 
-		// check free space in existing regions
-
-		#if 0
-		addr_t rem_va = 0;
-		addr_t loc_va = 0;
-		size_t sz = 0;
-		int diff_loc_rem = 0;
-		if (0 && find_remote_free_space(&rem_va, &sz))
-		{
-			// rem_va may be unaligned, align it
-			addr_t aligned = align_up(rem_va, 8);
-			sz -= aligned - rem_va;
-			rem_va = aligned;
-			loc_va = location(rem_va, sz, Acc_rw);
-			diff_loc_rem = loc_va - rem_va;
-			assert(loc_va);
-		}
-		#else
 		addr_t rem_va = args_page_rem_va;
 		addr_t loc_va = fp.addr();
 		size_t sz = Cfg_page_sz;
 		int diff_loc_rem = loc_va - rem_va;
-		#endif
+
 		//wrm_logd("argspace:  va=0x%x, sz=0x%x.\n", rem_va, sz);
 
 		// store argv
@@ -458,7 +465,7 @@ public:
 		}
 
 		size_t stack_params_sz = 3 * sizeof(word_t);  // 3 params
-		addr_t stack_location = location(_sp - stack_params_sz, stack_params_sz, Acc_rw);
+		addr_t stack_location = get_location(_sp - stack_params_sz, stack_params_sz, Acc_rw);
 		assert(stack_location);
 		word_t* sp_location = (word_t*)(stack_location + stack_params_sz);
 		//wrm_logd("sp_location=0x%x, sp=0x%x.\n", (unsigned)sp_location, _sp);
@@ -553,6 +560,7 @@ static App_map_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id
 	map->max_threads(cfg->max_threads);
 	map->max_prio(cfg->max_prio);
 	map->fpu(cfg->fpu);
+	map->malloc_strategy(cfg->malloc_strategy);
 
 	// preprocess elf - build memory map in app_maps
 	//wrm_logd("app:  prepare elf.\n");
@@ -608,14 +616,14 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	rc = wrm_app_alloc_thrno(app->owner(), &newno);
 	if (rc)
 		panic("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
-	L4_thrid_t newid = L4_thrid_t::create_global(newno, 7/* ver ??? */);
+	L4_thrid_t newid = L4_thrid_t::create_global(newno);
 	assert(newid == app->owner());
 
 	// create application's thread/aspace via ThreadControl
 	L4_thrid_t space = newid;  // =dest for aspace creation
 	L4_thrid_t sched = alpha;
 	L4_thrid_t pager = L4_thrid_t::Nil;
-	addr_t     utcb_location = app->location(app->utcb().addr(), app->utcb().size(), Acc_rw);
+	addr_t     utcb_location = app->get_location(app->utcb().addr(), app->utcb().size(), Acc_rw);
 	assert(utcb_location);
 	rc = l4_thread_control(newid, space, sched, pager, utcb_location);
 	if (rc)
@@ -688,7 +696,27 @@ extern "C" int wrm_app_create(L4_thrid_t id, const Wrm_app_cfg_t* cfg)
 	return 0;
 }
 
-extern "C" int wrm_app_location(L4_thrid_t id, addr_t rem_addr, size_t sz, acc_t acc, L4_fpage_t* loc_fpage)
+extern "C" int wrm_app_add_location(L4_thrid_t id, addr_t rem_va, L4_fpage_t location)
+{
+	App_map_t* app = app_maps.find(id);
+	if (!app)
+	{
+		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
+		return -1;
+	}
+
+	int rc = app->add_location(rem_va, location);
+	if (rc)
+	{
+		wrm_loge("app=%.4s:  add_location(va=0x%lx, sz=0x%lx, loc=0x%lx) - rc=%d.\n",
+			app->name_str(), rem_va, location.size(), location.addr(), rc);
+		return -2;
+	}
+
+	return 0;
+}
+
+extern "C" int wrm_app_get_location(L4_thrid_t id, addr_t rem_addr, size_t sz, acc_t acc, L4_fpage_t* loc_fpage)
 {
 	App_map_t* app = app_maps.find(id);
 	if (!app)
@@ -699,13 +727,13 @@ extern "C" int wrm_app_location(L4_thrid_t id, addr_t rem_addr, size_t sz, acc_t
 	}
 
 	acc_t acc_max = 0;
-	addr_t local_addr = app->location(rem_addr, sz, acc, &acc_max);
+	addr_t local_addr = app->get_location(rem_addr, sz, acc, &acc_max);
 	if (!local_addr)
 	{
 		//wrm_logw("app=%.4s:  location for remote va=0x%x for acc=%u does not found, thr=%u.\n",
 		//	app->name_str(), rem_addr, acc, id.number());
 		// try to find without acc for debug
-		local_addr = app->location(rem_addr, sz, Acc_nil, &acc_max);
+		local_addr = app->get_location(rem_addr, sz, Acc_nil, &acc_max);
 		//wrm_logw("result for addr without acc:  local_addr=0x%lx, acc_max=%d.\n", local_addr, acc_max);
 
 		// FIXME:  WA for w4linux - allow map with increasing of access rights

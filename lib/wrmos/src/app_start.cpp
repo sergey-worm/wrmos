@@ -8,9 +8,12 @@
 #include "l4_api.h"
 #include "wlibc_cb.h"
 #include "wrm_thr.h"
+#include "wrm_mem.h"
 #include "wrm_mpool.h"
 #include "wrm_log.h"
 #include "wlibc_panic.h"
+#include <string.h>
+#include <assert.h>
 
 int main(int, const char**);
 
@@ -39,6 +42,48 @@ static void before_cb(size_t addr)
 static void after_cb(size_t addr)
 {
 	//wrm_logd("wrm:  call ctor:  0x%x  after.\n", addr);
+}
+
+// get from alpha fpages begin from 2GB till 1page
+static void init_heap()
+{
+	//wrm_logd("get memory from alpha.\n");
+
+	size_t req_size    = 0x10000000;  // 256 MB
+	addr_t heap_vspace = 0xe0000000;  // TODO:  allocate vspave
+
+	while (1)
+	{
+		//wrm_logd("req memory:  addr=0x%lx, sz=0x%zx.\n", heap_vspace, req_size);
+		if (heap_vspace + req_size > 0xf0000000)
+		{
+			wrm_loge("not enough vspace for heap:  addr=0x%lx, sz=0x%zx.\n", heap_vspace, req_size);
+			break;
+		}
+		int rc = wrm_mem_get_usual(heap_vspace, req_size);
+		if (rc == -5)  // heap not enough
+		{
+			// map reject
+			//wrm_logd("map reject.\n");
+			if (req_size == Cfg_page_sz)
+				break;
+			req_size >>= 1;
+			continue;
+		}
+		else if (rc)
+		{
+			wrm_loge("wrm_mem_get_usual() - rc=%d.\n", rc);
+			break;
+		}
+
+		L4_fpage_t fpage = L4_fpage_t::create(heap_vspace, req_size, L4_fpage_t::Acc_rw);
+		assert(!fpage.is_nil());
+		heap_vspace += req_size;
+		memset((void*)fpage.addr(), 0, fpage.size());  // to check unmapped addresses
+		wrm_mpool_add(fpage);
+	}
+
+	//wrm_logd("got memory:  %#zx bytes.\n", wrm_mpool_size());
 }
 
 // application entry point
@@ -86,13 +131,15 @@ extern "C" void _startup(word_t fpu, word_t argc, word_t argv)
 {
 	init_bss();                        // clear .bss section
 	init_wlibc_callbacks();            // initialize wlibc callbacks
+	init_heap();                       // get memory from alpha
 
 	// enable fpu if need
 	if (fpu)
 	{
-		int rc = wrm_thread_flags(l4_utcb()->local_id(), Wrm_thr_flag_fpu);
+		word_t flags = Wrm_thr_flag_fpu;
+		int rc = l4_exreg_flags(l4_utcb()->local_id(), &flags, NULL);
 		if (rc)
-			panic("wrm_thread_flags(fpu) - rc=%u.\n", rc);
+			panic("l4_exreg_flags(fpu) - rc=%u.\n", rc);
 	}
 
 	call_ctors(before_cb, after_cb);   // call user ctors

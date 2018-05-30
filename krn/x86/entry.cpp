@@ -7,6 +7,7 @@
 
 #include "sched.h"
 #include "kentry.h"
+#include <assert.h>
 
 enum
 {
@@ -94,7 +95,7 @@ struct Selector_ecode_t
 	Selector_ecode_t(uint32_t val) : raw(val) {}
 };
 
-word_t arch_get_access(word_t ecode)
+static word_t arch_get_access(word_t ecode)
 {
 	enum
 	{
@@ -138,7 +139,7 @@ word_t arch_get_access(word_t ecode)
 	return acc;
 }
 
-void exc_handler(unsigned exc, Entry_frame_t* eframe)
+static void exc_handler(unsigned exc, Entry_frame_t* eframe)
 {
 	//printk("exc:  exc=%u/%s, frame=0x%x.\n", exc, exc2str(exc), eframe);
 	//eframe->dump();
@@ -165,22 +166,35 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 
 			if (eframe->is_krn_entry())
 				panic("exception in kernel mode.");
-			else
-				panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
+
+			panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
+			break;
 		}
 		case Exc_gprot_fault:
 		{
-			/**/printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
-			/**/	exc, exc2str(exc), Proc::cr2(), eframe->syscall_frame.ip());
-			/**/eframe->dump(printf);
+			/**/printk("exc:  exc=%u/%s, inst=0x%lx.\n",
+			/**/	exc, exc2str(exc), eframe->syscall_frame.ip());
 
 			Selector_ecode_t e = eframe->error();
 			printk("ext=%u, tbl=%u/%s, index=%u.\n", e.ext, e.tbl, e.table(), e.index);
 
 			if (eframe->is_krn_entry())
-				panic("exception in kernel mode.");
+				panic("exception in kernel mode:  exc=%u/%s.\n", exc, exc2str(exc));
+
+			enum { Opcode_in = 0xec, Opcode_out = 0xee };
+			unsigned long ip = eframe->syscall_frame.ip();
+			uint8_t opcode = *(uint8_t*)ip;
+
+			if (opcode == Opcode_in  ||  opcode == Opcode_out)
+			{
+				unsigned port = eframe->dx();
+				kentry_pagefault(port, 1<<3/*Acc_ioop*/, ip);
+			}
 			else
+			{
 				panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
+			}
+			break;
 		}
 		case Exc_page_fault:
 		{
@@ -209,8 +223,9 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 
 			if (eframe->is_krn_entry())
 				panic("exception in kernel mode.");
-			else
-				panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
+
+			panic("IMPLME:  exc=%u/%s.\n", exc, exc2str(exc));
+			break;
 		}
 		default:
 			printk("exc:  exc=%u/%s, addr=0x%lx, inst=0x%lx.\n",
@@ -220,13 +235,13 @@ void exc_handler(unsigned exc, Entry_frame_t* eframe)
 	}
 }
 
-void irq_handler(unsigned irq, Entry_frame_t* eframe)
+static void irq_handler(unsigned irq, Entry_frame_t* eframe)
 {
 	(void) eframe;
 	kentry_irq(irq);
 }
 
-void scall_handler(unsigned trapno, Entry_frame_t* eframe)
+static void scall_handler(unsigned trapno, Entry_frame_t* eframe)
 {
 	//printk("sw irq:  trapno=%u, frame=0x%lx.\n", trapno, eframe);
 	//eframe->dump();
@@ -238,10 +253,10 @@ void scall_handler(unsigned trapno, Entry_frame_t* eframe)
 
 extern "C" void x86_entry_trap(word_t gateno, Entry_frame_t* eframe)
 {
-	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__));
+	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__, gateno==0x20));
 
-	//printk("trap:  gateno=0x%lx/%lu, frame=0x%p.\n", gateno, gateno, eframe);
-	//eframe->dump();
+	//printk_notime("trap:  gateno=0x%lx/%lu, frame=0x%p.\n", gateno, gateno, eframe);
+	//eframe->dump(printf);
 	//printk("eframe=0x%p, cur_eframe=0x%p.\n", eframe, Sched_t::current()->entry_frame());
 
 	// pfault  ||  idle thread  ||  check kentry_sp

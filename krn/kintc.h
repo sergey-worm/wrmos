@@ -7,18 +7,23 @@
 #ifndef KINTCTRL_H
 #define KINTCTRL_H
 
+#include "krn-config.h"
+#if Cfg_max_cpus > 1
+#  define SMP
+#endif
 #include "intc.h"
-#include <assert.h>
+#include "wlibc_assert.h"
+#include "sys_types.h"
 
 class Intc
 {
-	static uintptr_t _addr;  // device base address
+	static addr_t _addr;  // device base address
 
 public:
 
-	typedef void (*Print_t)(const char* format, ...);
+	typedef void (*Print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
-	static inline void init(uintptr_t base_addr, Print_t dprint = 0)
+	static inline void init(addr_t base_addr, Print_t dprint = 0)
 	{
 		_addr = base_addr;
 		intc_init(_addr, dprint);
@@ -31,20 +36,20 @@ public:
 
 	static void dump(Print_t dprint)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return intc_dump(_addr, dprint);
 	}
 
 	static inline bool is_pending(unsigned irq)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return intc_is_pending(_addr, irq);
 	}
 
 	#ifdef Cfg_arch_sparc
 	static inline unsigned real_irq(unsigned irq)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return intc_real_irq(_addr, irq);
 	}
 	#endif
@@ -52,45 +57,47 @@ public:
 	#ifdef Cfg_arch_arm
 	static inline unsigned irq()
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		return intc_irq(_addr);
 	}
 	#endif
 
 	static inline void eoi(unsigned irq)
 	{
-		assert(_addr != -1);
-		#ifdef Cfg_arch_arm
+		wassert(_addr != -1);
 		int rc = intc_eoi(_addr, irq);
-		#else
-		int rc = 0; (void)irq;
-		#endif
-		(void)rc;
-		assert(!rc && "intc_eoi() failed");
+		(void) rc;
+		wassert(!rc && "intc_eoi() failed");
 	}
 
 	static inline void mask(unsigned irq)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		int rc = intc_mask(_addr, irq);
-		(void)rc;
-		assert(!rc && "intc_mask() failed");
+		(void) rc;
+		wassert(!rc && "intc_mask() failed");
 	}
 
 	static inline void unmask(unsigned irq)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		int rc = intc_unmask(_addr, irq);
-		(void)rc;
-		assert(!rc && "intc_unmask() failed");
+		(void) rc;
+		wassert(!rc && "intc_unmask() failed");
 	}
 
 	static inline void clear(unsigned irq)
 	{
-		assert(_addr != -1);
+		wassert(_addr != -1);
 		int rc = intc_clear(_addr, irq);
-		(void)rc;
-		assert(!rc && "intc_clear() failed");
+		(void) rc;
+		wassert(!rc && "intc_clear() failed");
+	}
+
+	static inline unsigned ncpu()
+	{
+		wassert(_addr != -1);
+		return intc_ncpu(_addr);
 	}
 };
 

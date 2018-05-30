@@ -7,6 +7,8 @@
 #ifndef TIME_ACCOUNT_H
 #define TIME_ACCOUNT_H
 
+#include "wlibc_assert.h"
+
 class Time_account_t
 {
 	// timepoints
@@ -92,7 +94,7 @@ public:
 	void tmevent_resume(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_suspend);
+		wassert(prev_point == Tp_suspend);
 		prev_point = Tp_resume;
 		points[prev_point] = now;
 	}
@@ -101,7 +103,7 @@ public:
 	void tmevent_kexit_start(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume  ||  prev_point == Tp_kexit_start);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume  ||  prev_point == Tp_kexit_start);
 		spans[Ts_execution] += now - points[prev_point];
 		spans[Ts_kwork]     += now - points[prev_point];
 		prev_point = Tp_kexit_start;
@@ -112,7 +114,7 @@ public:
 	void tmevent_kentry_end(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_kexit_start  ||  prev_point == Tp_resume  ||  prev_point == Tp_kentry_end);
+		wassert(prev_point == Tp_kexit_start  ||  prev_point == Tp_resume  ||  prev_point == Tp_kentry_end);
 
 		// account whole execution timespan
 		spans[Ts_execution] += now - points[prev_point];
@@ -128,9 +130,9 @@ public:
 			L4_clock_t end = Timer::usec_from_raw_value(cur_kexit_end);
 			end += points[Tp_kexit_start] / Cfg_krn_tick_usec * Cfg_krn_tick_usec;
 			end += end < points[Tp_kexit_start]  ?  Cfg_krn_tick_usec  :  0;
-			assert(end >= points[Tp_kexit_start]);
+			wassert(end >= points[Tp_kexit_start]);
 			//printf("s=%llu,  e=%llu.\n", points[Tp_kexit_start], end);
-			assert(end - points[Tp_kexit_start] < 500); // for qemu timespan may be big (<500)
+			wassert(end - points[Tp_kexit_start] < 500); // for qemu timespan may be big (<500)
 			points[Tp_kexit_end] = end;
 			spans[Ts_kexit] += points[Tp_kexit_end] - points[Tp_kexit_start];
 		}
@@ -142,8 +144,8 @@ public:
 			L4_clock_t start = Timer::usec_from_raw_value(cur_kentry_start);
 			start += points[Tp_kentry_end] / Cfg_krn_tick_usec * Cfg_krn_tick_usec;
 			start -= ((points[Tp_kentry_end] - start) > Cfg_krn_tick_usec)  ?  Cfg_krn_tick_usec  :  0;
-			assert((points[Tp_kentry_end] - start) < Cfg_krn_tick_usec);
-			assert((points[Tp_kentry_end] - start) < 500); // for qemu timespan may be big (<500)
+			wassert((points[Tp_kentry_end] - start) < Cfg_krn_tick_usec);
+			wassert((points[Tp_kentry_end] - start) < 500); // for qemu timespan may be big (<500)
 			points[Tp_kentry_start] = start;
 			spans[Ts_kentry] += points[Tp_kentry_end] - points[Tp_kentry_start];
 		}
@@ -153,7 +155,7 @@ public:
 	void tmevent_suspend(L4_clock_t now)
 	{
 		//printf("%s:  %s:  prev_point=%d/%s.\n", __func__, thr_name, prev_point, name(prev_point));
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		spans[Ts_execution] += now - points[prev_point];
 		spans[Ts_kwork]     += now - points[prev_point];
 		prev_point = Tp_suspend;
@@ -163,42 +165,42 @@ public:
 	// start of profiler span 1
 	void tmevent_kwork_1s(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		points[Tp_kwork_1s] = now;
 	}
 
 	// end of profiler span 1
 	void tmevent_kwork_1e(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		spans[Ts_kwork_1] += now - points[Tp_kwork_1s];
 	}
 
 	// start of profiler span 2
 	void tmevent_kwork_2s(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		points[Tp_kwork_2s] = now;
 	}
 
 	// end of profiler span 2
 	void tmevent_kwork_2e(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		spans[Ts_kwork_2] += now - points[Tp_kwork_2s];
 	}
 
 	// start of profiler span 3
 	void tmevent_kwork_3s(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		points[Tp_kwork_3s] = now;
 	}
 
 	// end of profiler span 3
 	void tmevent_kwork_3e(L4_clock_t now)
 	{
-		assert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
+		wassert(prev_point == Tp_kentry_end  ||  prev_point == Tp_resume);
 		spans[Ts_kwork_3] += now - points[Tp_kwork_3s];
 	}
 };

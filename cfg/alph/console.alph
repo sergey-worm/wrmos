@@ -11,53 +11,61 @@ MEMORY
 # applications
 APPLICATIONS
 	{
-		name:         uart
-		short_name:   uart
-		file_path:    ramfs:/uart.elf
-		stack_size:   0x1000
-		aspaces_max:  1
-		threads_max:  3
-		prio_max:     120
-		fpu:          off
-		devices:      uart
+		name:             uart
+		short_name:       uart
+		file_path:        ramfs:/uart.elf
+		stack_size:       0x1000
+		heap_size:        0x4000
+		aspaces_max:      1
+		threads_max:      3
+		prio_max:         120
+		fpu:              off
+		malloc_strategy:  on_startup
+		devices:          uart
 		memory:
-		args:         uart
+		args:             uart
 	}
 	{
-		name:         console
-		short_name:   cons
-		file_path:    ramfs:/console.elf
-		stack_size:   0x1000
-		aspaces_max:  1
-		threads_max:  3
-		prio_max:     110
-		fpu:          off
+		name:             console
+		short_name:       cons
+		file_path:        ramfs:/console.elf
+		stack_size:       0x1000
+		heap_size:        0x4000
+		aspaces_max:      1
+		threads_max:      3
+		prio_max:         110
+		fpu:              off
+		malloc_strategy:  on_startup
 		devices:
 		memory:
 		args:
 	}
 	{
-		name:         hello-1
-		short_name:   hl-1
-		file_path:    ramfs:/chello.elf
-		stack_size:   0x1000
-		aspaces_max:  1
-		threads_max:  1
-		prio_max:     100
-		fpu:          off
+		name:             hello-1
+		short_name:       hl-1
+		file_path:        ramfs:/chello.elf
+		stack_size:       0x1000
+		heap_size:        0x1000
+		aspaces_max:      1
+		threads_max:      1
+		prio_max:         100
+		fpu:              off
+		malloc_strategy:  on_pagefault
 		devices:
 		memory:
 		args:
 	}
 	{
-		name:         hello-2
-		short_name:   hl-2
-		file_path:    ramfs:/chello.elf
-		stack_size:   0x1000
-		aspaces_max:  1
-		threads_max:  1
-		prio_max:     100
-		fpu:          off
+		name:             hello-2
+		short_name:       hl-2
+		file_path:        ramfs:/chello.elf
+		stack_size:       0x1000
+		heap_size:        0x1000
+		aspaces_max:      1
+		threads_max:      1
+		prio_max:         100
+		fpu:              off
+		malloc_strategy:  on_pagefault
 		devices:
 		memory:
 		args:

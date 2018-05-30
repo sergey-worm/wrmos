@@ -85,7 +85,8 @@ SECTIONS
 	. = ALIGN(Cfg_page_sz);
 	_bootloader_end = .;
 
-	/DISCARD/ : {
+	/DISCARD/ :
+	{
 		*(.dtors)
 		*(.fini_array)
 		*(.note)

@@ -14,15 +14,16 @@
 #  system params
 #---------------------------------------------------------------------------------------------------
 
-arch         = arm
-arch_ver     = armv7-a
-cpu          = cortex_a9
-plat         = vexpress_a9
-brd          = qemu_vexpress_a9
-sys_clock_hz = 1000000
-ram_start    = 0x60000000
-ram_sz       = 0x800000
-page_sz      = 0x1000
+arch             = arm
+arch_ver         = armv7-a
+cpu              = cortex_a9
+plat             = vexpress_a9
+brd              = qemu_vexpress_a9
+max_cpus         = 4
+sys_clock_hz     = 1000000
+ram_start        = 0x60000000
+ram_sz           = 0x800000
+page_sz          = 0x1000
 
 #---------------------------------------------------------------------------------------------------
 #  kernel params

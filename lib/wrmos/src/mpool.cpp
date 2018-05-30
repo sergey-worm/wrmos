@@ -65,7 +65,7 @@ private:
 
 		// checking
 		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u, before checking.\n", __func__, sz_bytes, log2sz);
-		if ((size_t)(1<<log2sz) != sz_bytes)
+		if ((size_t)(1lu<<log2sz) != sz_bytes)
 			return 0;
 
 		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u.\n", __func__, sz_bytes, log2sz);
@@ -102,16 +102,16 @@ public:
 
 	L4_fpage_t alloc_log2sz(size_t log2sz)
 	{
-		//wrm_logd("%s:  log2sz=%u, pool_sz=0x%x (&pool_sz=0x%x).\n", __func__, log2sz, _pool_sz_bytes, &_pool_sz_bytes);
+		//wrm_logd("%s:  log2sz=%zu, pool_sz=0x%zx (&pool_sz=0x%p).\n", __func__, log2sz, _pool_sz_bytes, &_pool_sz_bytes);
 		if (log2sz < Log2sz_min  ||  log2sz > Log2sz_max)
 		{
-			wrm_loge("wrong log2sz=%zu.\n", log2sz);
+			wrm_loge("%s:  wrong log2sz=%zu.\n", __func__, log2sz);
 			return L4_fpage_t::create_nil();
 		}
 
 		if (_pool_sz_bytes < (size_t)(1<<log2sz))
 		{
-			wrm_logw("no mem:  pool_sz=0x%zx, require=0x%x.\n", _pool_sz_bytes, 1<<log2sz);
+			wrm_logw("%s:  no mem:  pool_sz=0x%zx, require=0x%x.\n", __func__, _pool_sz_bytes, 1<<log2sz);
 			return L4_fpage_t::create_nil();
 		}
 

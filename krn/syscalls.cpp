@@ -8,6 +8,7 @@
 #include "threads.h"
 #include "kuart.h"
 #include "l4_syscalls.h"
+#include <assert.h>
 
 void kdb_console_entry_wrapper(bool krn_mode, bool error_entry, const char* prompt);
 
@@ -166,7 +167,7 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	// check dst
 	if (!thrid_is_global_user(dst))
 	{
-		printk("tctl:  ERROR:  wrong dst=%u.\n", dst.number());
+		printk("tctl:  ERROR:  wrong dst=%u/0x%lx.\n", dst.number(), dst.raw());
 		cur.uutcb()->error(2);  // UnavailableThread
 		return;
 	}
@@ -464,7 +465,11 @@ void syscall_unmap(Thread_t& cur, Entry_frame_t& eframe)
 	for (unsigned i=0; i<fpages; ++i)
 	{
 		L4_fpage_t fpage = L4_fpage_t::create(utcb->mr[i]);
-		if (fpage.is_complete())
+		if (fpage.is_io())
+		{
+			panic("IMPLME:  unmap IO ports.\n");
+		}
+		else if (fpage.is_complete())
 		{
 			// wrm extention
 			printk("unmap:  complete aspace.\n");
@@ -520,9 +525,10 @@ void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
 	if (!tsk->threads_active())
 	{
 		if (!is_aligned(utcb_area.addr(), Cfg_page_sz)  ||  !is_aligned(utcb_area.size(), Cfg_page_sz)  ||
-			utcb_area.access() != Acc_rw)
+			(utcb_area.access() & Acc_rw) != Acc_rw)
 		{
-			printk("ERROR:  sctl:  unavailable UTCB area:  addr=0x%lx, sz=0x%lx.\n", utcb_area.addr(), utcb_area.size());
+			printk("ERROR:  sctl:  unavailable UTCB area:  addr=0x%lx, sz=0x%lx, acc=%d.\n",
+				utcb_area.addr(), utcb_area.size(), utcb_area.access());
 			cur.uutcb()->error(6);  // Invalid UTCB area
 			return;
 		}
@@ -594,17 +600,22 @@ void syscall_memory_control(Thread_t& cur, Entry_frame_t& eframe)
 		int cached = (attr[attr_index] == 1) ? NotCachable : Cachable;
 		L4_fpage_t fp = L4_fpage_t::create(cur.uutcb()->mr[i]);
 
-		int cur_attr = cur.task()->attributes(fp);
-		if (cur_attr < 0)
+		assert(!fp.is_io());  // must not be IO-fpage
+		if (!fp.is_complete() && !fp.is_nil())
 		{
-			printk("ERROR:  mctl:  alien fpage:  addr=0x%lx, sz=0x%lx.\n", fp.addr(), fp.size());
-			cur.uutcb()->error(5);  // InvalidParameter
-			return;
+			int cur_attr = cur.task()->attributes(fp);
+			if (cur_attr < 0)
+			{
+				printk("ERROR:  mctl:  alien fpage:  addr=0x%lx, sz=0x%lx.\n", fp.addr(), fp.size());
+				cur.uutcb()->error(5);  // InvalidParameter
+				return;
+			}
+			// NOTE 1:  sigma0 and roottask have 1:1 maping
+			// NOTE 2:  result acc will be (cur | map_acc)  -->  use map_acc=0x0
+			cur.task()->map(fp.addr(), fp.addr(), fp.size(), Aspace::uacc2acc(0), cached);
 		}
-
-		// NOTE 1:  sigma0 and roottask have 1:1 maping
-		// NOTE 2:  result acc will be (cur | map_acc)  -->  use map_acc=0x0
-		cur.task()->map(fp.addr(), fp.addr(), fp.size(), Aspace::uacc2acc(0), cached);
+		else
+			panic("mctl:  fpage is complete or nil.");
 	}
 
 	eframe.scall_mctl_result(1); // syscall success

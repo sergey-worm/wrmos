@@ -84,16 +84,39 @@ public:
 		Proc::wim(1 << inv_win);
 	}
 
+	static inline word_t asr17() { word_t v; asm volatile("rd %%asr17, %0" : "=r"(v)); return v; }
+	#ifdef SMP
+	static inline unsigned cpuid() { return asr17() >> 28; }
+	#else
+	static inline unsigned cpuid() { return 0; }
+	#endif
+
+	static inline void rmb()        { asm volatile ("" ::: "memory"); }
+	static inline void wmb()        { asm volatile ("" ::: "memory"); }
+	static inline void wait_event() { asm volatile ("" ::: "memory"); }
+	static inline void send_event() { asm volatile ("" ::: "memory"); }
+
 	static inline void set_new_stack_area(word_t addr, size_t sz)
 	{
 		discard_dirty_regwins();
 		sp(addr + sz - Stack_frame_sz);
 	}
 
-	static inline void jump(long addr)
+	static inline void jump(long addr) __attribute__((noreturn))
 	{
-		asm volatile ("b %0;  nop" :: "i"(addr));
+		asm volatile ("jmp %0;  nop" :: "r"(addr));
+		while (1) {}
 	}
+
+	// no inline to don't use stack variables after set_new_stack_area()
+	static void set_new_stack_area_and_jump(addr_t stack, size_t sz, addr_t addr)
+		__attribute__((noinline,noreturn))
+	{
+		set_new_stack_area(stack, sz);
+		jump(addr);
+		while (1) {}
+	}
+
 
 	static inline void enable_irq()
 	{
@@ -139,6 +162,21 @@ public:
 	static inline word_t load_phys_word(addr_t pa)
 	{
 		return lda(pa, Asi_mmu_bypass);
+	}
+
+	static inline void dcache_flush()
+	{
+
+	}
+
+	static inline void dcache_inval()
+	{
+
+	}
+
+	static inline void icache_inval()
+	{
+
 	}
 };
 

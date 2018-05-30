@@ -9,11 +9,6 @@
 #include "sys_proc.h"
 #include "../x86/x86_common.h"
 
-// data for x86 video output (video.h)
-unsigned video_x;
-unsigned video_y;
-uintptr_t video_mem;
-
 void arch_init()
 {
 	set_gdt();
@@ -26,14 +21,14 @@ void arch_set_timer_va(long va)
 	(void) va;  // nothing for x86
 }
 
-void arch_set_ksp(uintptr_t ksp)
+void arch_set_ksp(long ksp)
 {
-	tss.set_ksp(ksp);
+	tss.hw.set_ksp(ksp);
 }
 
-uintptr_t arch_get_ksp()
+long arch_get_ksp()
 {
-	return tss.get_ksp();
+	return tss.hw.get_ksp();
 }
 
 void __attribute__((section(".user.text"))) arch_user_invoke()

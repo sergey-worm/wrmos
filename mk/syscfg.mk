@@ -7,7 +7,9 @@
 #  CONFIG RULES
 #---------------------------------------------------------------------------------------------------
 
-$(cfgdir)/sys-config.h:  $(prj_file)
+cfg_deps = $(prj_file) $(plt_file) $(wrmdir)/cfg/base.cfg
+
+$(cfgdir)/sys-config.h:  $(cfg_deps)
 	@$(echo) "$(color_compile)[GEN] $(notdir $(prj_file)) --> $(notdir $@)$(color_off)";
 	@mkdir -p $(dir $@)
 	@echo -en "\
@@ -24,6 +26,7 @@ $(cfgdir)/sys-config.h:  $(prj_file)
 	#define Cfg_plat_$(plat)\n\
 	#define Cfg_brd $(brd)\n\
 	#define Cfg_brd_$(brd)\n\
+	#define Cfg_max_cpus $(max_cpus)\n\
 	#define Cfg_sys_clock_hz $(sys_clock_hz)\n\
 	#define Cfg_ram_start $(ram_start)\n\
 	#define Cfg_ram_sz $(ram_sz)\n\
@@ -35,7 +38,11 @@ $(cfgdir)/sys-config.h:  $(prj_file)
 # сhoose an address upper kernel + 16 MB and aligned to 2 MB
 kuart_va = (((Cfg_krn_vaddr + 0x1000000) & 0xffffffffffe00000) + (Cfg_krn_uart_paddr & 0xfffff))
 
-$(cfgdir)/krn-config.h:  $(prj_file)
+# intc vaddr for temporary rude mapping, use at initial startup code
+# сhoose an address upper kernel + 32 MB and aligned to 2 MB
+kintc_va = (((Cfg_krn_vaddr + 0x2000000) & 0xffffffffffe00000) + (Cfg_krn_intc_paddr & 0xfffff))
+
+$(cfgdir)/krn-config.h:  $(cfg_deps)
 	@$(echo) "$(color_compile)[GEN] $(notdir $(prj_file)) --> $(notdir $@)$(color_off)"
 	@mkdir -p $(dir $@)
 	@echo -en "\
@@ -55,14 +62,16 @@ $(cfgdir)/krn-config.h:  $(prj_file)
 	#define Cfg_krn_uart_bitrate $(krn_uart_bitrate)\n\
 	#define Cfg_krn_uart_irq $(krn_uart_irq)\n\
 	#define Cfg_krn_intc_paddr $(krn_intc_paddr)\n\
+	#define Cfg_krn_intc_vaddr $(kintc_va)\n\
 	#define Cfg_krn_intc_sz $(krn_intc_sz)\n\
 	#define Cfg_krn_timer_paddr $(krn_timer_paddr)\n\
 	#define Cfg_krn_timer_sz $(krn_timer_sz)\n\
 	#define Cfg_krn_timer_irq $(krn_timer_irq)\n\
+	#define Cfg_krn_timer_lag_usec $(krn_timer_lag_usec)\n\
 	\n\
 	#endif // KRN_CONFIG_H" > $@
 
-$(cfgdir)/ldr-config.h:  $(prj_file)
+$(cfgdir)/ldr-config.h:  $(cfg_deps)
 	@$(echo) "$(color_compile)[GEN] $(notdir $(prj_file)) --> $(notdir $@)$(color_off)"
 	@mkdir -p $(dir $@)
 	@echo -en "\
@@ -91,7 +100,7 @@ update_load_addr_file = $(SHELL) -c '\
 		\#define Cfg_load_addr $2" > $1; \
 	if [ "$v" != "@" ]; then echo New load address is $2 for $(target); fi; '
 
-$(cfgdir)/kernel-load-addr.h:  $(prj_file)
+$(cfgdir)/kernel-load-addr.h:  $(cfg_deps)
 	@$(echo) "$(color_compile)[GEN] $(notdir $(target)):  $(notdir $(prj_file)) --> $(notdir $@)$(color_off)"
 	@mkdir -p $(blddir)/config
 	@$(call update_load_addr_file,$@,$(ram_start))

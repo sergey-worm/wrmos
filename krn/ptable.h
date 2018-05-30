@@ -12,6 +12,7 @@
 #include "printk.h"
 #include "sys_types.h"
 #include "sys_utils.h"
+#include "sys_proc.h"
 #include "wlibc_assert.h"
 #include <string.h>
 
@@ -23,7 +24,7 @@ paddr_t kmem_paddr(addr_t va, size_t sz);
 void* kmem_vaddr(paddr_t pa, size_t sz);
 
 // alloc aligned memory or die
-inline word_t* create_table(size_t sz)
+static word_t* create_table(size_t sz)
 {
 	word_t* tb = (word_t*) kmem_alloc(sz, sz);
 	if (!tb)
@@ -106,7 +107,9 @@ public:
 			}
 			else if (mmu_is_dir(Level, cell))
 			{
-				printk("%*s L%u:  i=%3d:  dir:  start_va=0x%lx\n", Indent, "", Level, i, start_va + mmu_index2va(Level, i));
+				printk("%*s L%u:  i=%3d:  dir:  start_va=0x%lx\n", Indent, "", Level, i,
+					start_va + mmu_index2va(Level, i));
+
 				paddr_t child_pa = mmu_get_dir_pa(Level, cell);
 				size_t child_sz = Child_ptable::Table_bytes;
 				Child_ptable* child = (Child_ptable*) kmem_vaddr(child_pa, child_sz);
@@ -139,7 +142,9 @@ public:
 
 	void set_dir(addr_t va, unsigned dir_level, void* dir_tb)
 	{
-		//printk("%s:  L%u:  va=0x%lx, dir_lev=%ld, dir_tb=0x%lx.\n", __func__, Level, va, dir_level, dir_tb);
+		//printk("Ptable::%s:  L%u:  va=0x%lx, dir_lev=%u, dir_tb=0x%p.\n", __func__,
+		//	Level, va, dir_level, dir_tb);
+
 		word_t* cell = get_cell(va);
 		if (Level + 1 == dir_level)
 		{
@@ -177,7 +182,8 @@ public:
 
 	void map(addr_t vaddr, paddr_t paddr, size_t size, unsigned access, unsigned cachable, bool allow_over_map)
 	{
-		//printk("Ptable::%s:  lev=%u:  va=%lx, pa=%llx, sz=0x%x.\n", __func__, Level, vaddr, paddr, size);
+		//force_printk_uart("Ptable::%s:  lev=%u:  va=%lx, pa=%llx, sz=0x%zx.\n", __func__,
+		//	Level, vaddr, (long long)paddr, size);
 
 		wassert(mmu_isalign(vaddr, Cfg_page_sz));
 		wassert(mmu_isalign(paddr, Cfg_page_sz));
@@ -191,7 +197,7 @@ public:
 		while (rest)
 		{
 			word_t* cell = get_cell(va);
-			//printk("Ptable::%s:  lev=%u:  va=%lx, cell=%lx/%lx, *cell=%lx.\n",
+			//printk("Ptable::%s:  lev=%u:  va=%lx, cell=%p/%lx, *cell=%lx.\n",
 			//	__func__, Level, va, cell, (va & Index_mask) >> Addr_index_low, *cell);
 
 			if (!(va & Offset_mask)  &&  rest >= Page_sz) // whole page
@@ -229,7 +235,8 @@ public:
 					child = (Child_ptable*) kmem_vaddr(child_pa, child_sz);
 				}
 				else if (mmu_is_map(Level, cell))
-					panic("Attempt to map, walk to next level ptable, but already mapped:  lev=%u, va=%lx.", Level, va);
+					panic("Attempt to map, walk to next level ptable, but already mapped:  lev=%u, va=%lx.",
+						Level, va);
 				else
 					panic("Unknown cell type:  lev=%u, cell=0x%lx.", Level, *cell);
 
@@ -485,6 +492,7 @@ public:
 	{
 		// TODO:  wassert(not-in-kerntb)
 		roottb->map(va, pa, sz, access, cachable, true);
+		Proc::dcache_flush(); // FIXME: use uncached memory for ptab or flush one some lines, not entire cache
 	}
 
 	// unmap in root ptable
@@ -492,6 +500,7 @@ public:
 	{
 		// TODO:  wassert(not-in-kerntb)
 		roottb->unmap(va, sz);
+		Proc::dcache_flush(); // FIXME: use uncached memory for ptab or flush one some lines, not entire cache
 	}
 
 	// walk in root ptable
@@ -519,6 +528,7 @@ public:
 			va += s;
 			pa += s;
 		}
+		Proc::dcache_flush(); // FIXME: use uncached memory for ptab or flush one some lines, not entire cache
 	}
 
 	// unmap in kernel ptable
@@ -528,6 +538,7 @@ public:
 		wassert((va+sz) > Kern_va  &&  (va+sz) <= (Kern_va + Kspace_sz));
 		unsigned index = (va - Kern_va) / Ktab_t::Aspace_sz;
 		kerntb[index]->unmap(va, sz);
+		Proc::dcache_flush(); // FIXME: use uncached memory for ptab or flush one some lines, not entire cache
 	}
 
 	// walk in kernel ptable
@@ -551,13 +562,16 @@ public:
 	// set current MMU context number
 	void set_current()
 	{
+		Proc::dcache_flush();  // writeback dcache to memory
+		Proc::dcache_inval();  // invalidate dcache
+		Proc::icache_inval();  // invalidate icache
+		mmu_tlb_flush();       // invalidate TLB
+
 		#ifdef USE_CTXTB
 		mmu_reg_ctx(ctxid);
 		#else
 		mmu_root_table(kmem_paddr(roottb, L1_sz * sizeof(word_t)));
 		#endif
-
-		mmu_tlb_flush();
 	}
 };
 

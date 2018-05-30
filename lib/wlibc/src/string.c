@@ -87,7 +87,7 @@ void* memset(void* dst, int val, size_t sz)
 	{
 		//wlibc_stat_memset64 += sz;
 		val &= 0xff;
-		uint64_t v = val<<24 | val<<26 | val<<8 | val;
+		uint64_t v = val<<24 | val<<16 | val<<8 | val;
 		v |= v << 32;
 		for (size_t i=0; i<sz/sizeof(uint64_t); ++i)
 			((uint64_t*)dst)[i] = v;
@@ -97,7 +97,7 @@ void* memset(void* dst, int val, size_t sz)
 	{
 		//wlibc_stat_memset32 += sz;
 		val &= 0xff;
-		long v = val<<24 | val<<26 | val<<8 | val;
+		long v = val<<24 | val<<16 | val<<8 | val;
 		if (sizeof(long) > sizeof(uint32_t))
 			v |= (uint64_t)v << 32; // long have 64-bit size
 		for (size_t i=0; i<sz/sizeof(long); ++i)

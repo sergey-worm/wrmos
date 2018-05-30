@@ -65,14 +65,15 @@ _start:
 	or  $0x80, %al
 	out %al, $0x70
 
-	// 64-bit specific
+	// 64-bit specific (further boot1)
 
 	call check_cpu
 
 	call set_page_tables
 
 	// enter long mode
-	mov $0xa0, %eax                   // eet the PAE and PGE bits
+	mov $0xa0, %eax                   // set PAE and PGE bits
+	or $0x200, %eax                   // set OSFXSR bit - allow SSE/%xmm, gcc uses them for -O2
 	mov %eax, %cr4
 
 	mov $0xc0000080, %ecx             // read from the EFER MSR

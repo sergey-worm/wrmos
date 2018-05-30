@@ -25,12 +25,10 @@ static word_t l1tb  [L1_sz]  __attribute__((aligned(sizeof(word_t) * L1_sz)));
 extern "C" void bootstrap()
 {
 	// initialize page tables
-
 	addr_t kern_va = (addr_t)&_kern_vaddr;
 	addr_t kern_pa = (addr_t)&_kern_vaddr - (addr_t)&_diff_va_pa;
 	unsigned va_index_base = kern_va / L1_pgsz;
 	unsigned pa_index_base = kern_pa / L1_pgsz;
-
 	mmu_zero(ctxtb, sizeof(ctxtb));
 	mmu_zero(l1tb, sizeof(l1tb));
 
@@ -45,6 +43,7 @@ extern "C" void bootstrap()
 		mmu_set_map(1, l1tb + va_index_base + i, kern_pa + i * L1_pgsz, Mmu_acc_krwx_uno, Cachable);
 	}
 	mmu_set_map(1, l1tb + Cfg_krn_uart_vaddr / L1_pgsz, Cfg_krn_uart_paddr, Mmu_acc_krwx_uno, NotCachable);
+	mmu_set_map(1, l1tb + Cfg_krn_intc_vaddr / L1_pgsz, Cfg_krn_intc_paddr, Mmu_acc_krwx_uno, NotCachable);
 
 	word_t ctrl = mmu_reg_ctrl();                   //
 	ctrl |= 1;                                      //

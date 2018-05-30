@@ -2572,12 +2572,6 @@ int main(int argc, const char* argv[])
 	Ip_iface_t* ip_iface = net_stack.ip_ifaces.add(ip, 0xffffff00, eth_iface);
 	(void) ip_iface;
 
-
-	// FIXME:  get app memory from Alpha
-	static uint8_t memory [4*Cfg_page_sz] __attribute__((aligned(4*Cfg_page_sz)));
-	wrm_mpool_add(L4_fpage_t::create((addr_t)memory, sizeof(memory), Acc_rw));
-	// ~FIXME
-
 	// create Eth thread
 	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
 	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);

@@ -54,8 +54,11 @@ extern "C" void bootstrap()
 		mmu_set_map(3, l3tb_pa + pa_index_l3 + i, kern_pa + i * L3_pgsz, Mmu_acc_krwx_uno, Cachable);
 		mmu_set_map(3, l3tb_va + va_index_l3 + i, kern_pa + i * L3_pgsz, Mmu_acc_krwx_uno, Cachable);
 	}
-	unsigned index = (Cfg_krn_uart_vaddr / L3_pgsz) & (L3_sz - 1);
-	mmu_set_map(3, l3tb_va + index, Cfg_krn_uart_paddr, Mmu_acc_krwx_uno, NotCachable);
+	unsigned uart_index = (Cfg_krn_uart_vaddr / L3_pgsz) & (L3_sz - 1);
+	mmu_set_map(3, l3tb_va + uart_index, Cfg_krn_uart_paddr, Mmu_acc_krwx_uno, NotCachable);
+
+	unsigned intc_index = (Cfg_krn_intc_vaddr / L3_pgsz) & (L3_sz - 1);
+	mmu_set_map(3, l3tb_va + intc_index, Cfg_krn_intc_paddr, Mmu_acc_krwx_uno, NotCachable);
 
 	mmu_root_table((word_t)l1tb);
 

@@ -19,13 +19,13 @@ void arch_set_timer_va(long va)
 	timer_va = va;
 }
 
-void arch_set_ksp(uintptr_t ksp)
+void arch_set_ksp(long ksp)
 {
 	extern unsigned cur_ksp;
 	cur_ksp = ksp;
 }
 
-uintptr_t arch_get_ksp()
+long arch_get_ksp()
 {
 	extern unsigned cur_ksp;
 	return cur_ksp;

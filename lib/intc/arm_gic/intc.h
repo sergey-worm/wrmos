@@ -78,34 +78,44 @@ enum
 	Gicd_type_lines_mask = 0x1f,
 };
 
-typedef void (*Intc_print_t)(const char* format, ...);
+typedef void (*Intc_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
-inline unsigned getval(unsigned val, unsigned offset, unsigned mask)
+inline unsigned _getval(unsigned val, unsigned offset, unsigned mask)
 {
 	return (val >> offset) & mask;
 }
 
-inline unsigned ncpu(volatile Intc_regs_t* regs)
+inline unsigned _ncpu(volatile Intc_regs_t* regs)
 {
-	return getval(regs->gicd.type, Gicd_type_ncpu_offs, Gicd_type_ncpu_mask) + 1;
+	return _getval(regs->gicd.type, Gicd_type_ncpu_offs, Gicd_type_ncpu_mask) + 1;
 }
 
-static inline unsigned irqmax(volatile Intc_regs_t* regs)
+static inline unsigned _irqmax(volatile Intc_regs_t* regs)
 {
-	return 32 * (getval(regs->gicd.type, Gicd_type_lines_offs, Gicd_type_lines_mask) + 1);
+	return 32 * (_getval(regs->gicd.type, Gicd_type_lines_offs, Gicd_type_lines_mask) + 1);
+}
+
+inline unsigned intc_ncpu(unsigned long base_addr)
+{
+	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
+	return _ncpu(regs);
 }
 
 // get current pending irq
-inline unsigned intc_irq(unsigned base_addr)
+inline unsigned intc_irq(unsigned long base_addr)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 	return regs->gicc.ack;
 }
 
-inline void intc_init(unsigned base_addr, Intc_print_t dprint)
+inline void intc_init(unsigned long base_addr, Intc_print_t dprint)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
-	print("ARM GIC v1:    ncpu=%u, nirq=%u.\n", ncpu(regs), irqmax(regs));
+	print("ARM GIC v1:    ncpu=%u, nirq=%u.\n", _ncpu(regs), _irqmax(regs));
+
+	// disable
+	regs->gicd.control = 0;          // disable dist iface
+	regs->gicc.control = 0;          // disable cpu iface
 
 	// GICD init
 	regs->gicd.control = 1;          // enable dist iface
@@ -113,14 +123,21 @@ inline void intc_init(unsigned base_addr, Intc_print_t dprint)
 	// GICC init
 	regs->gicc.prio_mask = 0xff;     // set lowest prio, allow all irq prios
 	regs->gicc.bin_point = 0x7;      // ?
+	unsigned n = _irqmax(regs) / sizeof(uint32_t) / 8;
+	for (unsigned i=0; i<n; ++i)
+	{
+		regs->gicd.clr_en[i]   = -1;
+		regs->gicd.clr_pend[i] = -1;
+	}
 	regs->gicc.control = 1;          // enable cpu iface
+
 }
 
-inline int intc_unmask(unsigned base_addr, unsigned irq)
+inline int intc_unmask(unsigned long base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	if (irq >= irqmax(regs))
+	if (irq >= _irqmax(regs))
 		return 1;
 
 	((uint8_t*)regs->gicd.proc_target)[irq] = 0xff;  // target all processors
@@ -128,50 +145,50 @@ inline int intc_unmask(unsigned base_addr, unsigned irq)
 	return 0;
 }
 
-inline int intc_mask(unsigned base_addr, unsigned irq)
+inline int intc_mask(unsigned long base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	if (irq >= irqmax(regs))
+	if (irq >= _irqmax(regs))
 		return 1;
 
 	regs->gicd.set_en[irq/32] &= ~(1 << (irq%32));   // disable IRQ
 	return 0;
 }
 
-inline int intc_clear(unsigned base_addr, unsigned irq)
+inline int intc_clear(unsigned long base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	if (irq >= irqmax(regs))
+	if (irq >= _irqmax(regs))
 		return 1;
 
-	// nothing for PL011
+	regs->gicd.clr_pend[irq/32] = 1 << (irq%32);
 	return 0;
 }
 
-inline int intc_eoi(unsigned base_addr, unsigned irq)
+inline int intc_eoi(unsigned long base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	if (irq >= irqmax(regs))
+	if (irq >= _irqmax(regs))
 		return 1;
 
 	regs->gicc.eoi = irq;
 	return 0;
 }
 
-inline bool intc_is_pending(unsigned base_addr, unsigned irq)
+inline bool intc_is_pending(unsigned long base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	if (irq >= irqmax(regs))
+	if (irq >= _irqmax(regs))
 		return 1;
 
 	return regs->gicd.set_pend[irq/32] & (1 << (irq%32));
 }
 
-inline void intc_dump(unsigned base_addr, Intc_print_t dprint)
+inline void intc_dump(unsigned long base_addr, Intc_print_t dprint)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
@@ -193,13 +210,13 @@ inline void intc_dump(unsigned base_addr, Intc_print_t dprint)
 	print("    ident:      0x%x\n", regs->gicc.ident);
 	print("  GICD:\n");
 	print("    control:    0x%x\n", regs->gicd.control);
-	print("    type:       0x%x:  cpus=%u, irqs=%u\n", regs->gicd.type, ncpu(regs), irqmax(regs));
+	print("    type:       0x%x:  cpus=%u, irqs=%u\n", regs->gicd.type, _ncpu(regs), _irqmax(regs));
 	print("    imp_id:     0x%x\n", regs->gicd.imp_id);
 	print("    security:   0x%x\n", regs->gicd.security);
-	print("    set_en:     0x%x 0x%x 0x%x 0x%x\n", set_en[0], set_en[1], set_en[2], set_en[3]);
-	print("    clr_en:     0x%x 0x%x 0x%x 0x%x\n", clr_en[0], clr_en[1], clr_en[2], clr_en[3]);
-	print("    set_pend:   0x%x 0x%x 0x%x 0x%x\n", set_pend[0], set_pend[1], set_pend[2], set_pend[3]);
-	print("    clr_pend:   0x%x 0x%x 0x%x 0x%x\n", clr_pend[0], clr_pend[1], clr_pend[2], clr_pend[3]);
+	print("    set_en:     0x%08x 0x%08x 0x%08x 0x%08x\n", set_en[0], set_en[1], set_en[2], set_en[3]);
+	print("    clr_en:     0x%08x 0x%08x 0x%08x 0x%08x\n", clr_en[0], clr_en[1], clr_en[2], clr_en[3]);
+	print("    set_pend:   0x%08x 0x%08x 0x%08x 0x%08x\n", set_pend[0], set_pend[1], set_pend[2], set_pend[3]);
+	print("    clr_pend:   0x%08x 0x%08x 0x%08x 0x%08x\n", clr_pend[0], clr_pend[1], clr_pend[2], clr_pend[3]);
 }
 
 #undef print

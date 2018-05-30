@@ -26,7 +26,7 @@ ENTRY(_start)
 
 MEMORY
 {
-	#define Phys_area_sz (16 * Cfg_page_sz)   /* 1 pg for sparc, 8 for arm, 16 for x86 */
+	#define Phys_area_sz (32 * Cfg_page_sz)   /* 1 pg for sparc, 16 for arm, 16 for x86 */
 
 	#if ((Cfg_load_addr + Phys_area_sz) >= (Cfg_ram_start + Cfg_ram_sz))
 	#  error  Load address out of memory range or RAM isn't anouth.

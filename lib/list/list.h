@@ -7,7 +7,7 @@
 #ifndef LIST_H
 #define LIST_H
 
-typedef unsigned (*list_dprint_t)(const char* format, ...);
+typedef void (*list_dprint_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 #define List_no_dprint ((list_dprint_t)0)
 
 #ifdef DEBUG
@@ -54,9 +54,8 @@ class list_t
 		Xlist() : begin(0), last(0), sz(0) {}
 
 		// check xlist correctness and pos_in_list, need for debug
-		inline void check(Item* pos) const
+		inline void do_check(Item* pos) const
 		{
-		#ifdef DEBUG
 			wassert(sz || (begin==0 && last==0));
 			wassert(sz<=1 || begin!=last);
 			wassert(sz>1 || begin==last);
@@ -92,14 +91,20 @@ class list_t
 			wassert(begin == last_item);
 			wassert(sz == cnt);
 			wassert(pos_in_list || (!sz && !pos));
-		#else
-			(void)pos;
-		#endif
+		}
+
+		inline void check(Item* pos) const
+		{
+			#ifdef DEBUG
+			do_check(pos);
+			#else
+			(void) pos;
+			#endif
 		}
 
 		inline void remove(Item* item)
 		{
-			//print("    Xlist::%s:  before:  bgn=%x, lst=%x, sz=%u, itm=%x.\n", __func__, begin, last, sz, item);
+			//print("    Xlist::%s:  before:  bgn=%x, lst=%x, sz=%zu, itm=%x.\n", __func__, begin, last, sz, item);
 
 			wassert(sz);
 			check(begin);
@@ -114,16 +119,17 @@ class list_t
 				last = item->prev;
 			sz--;
 
-			//print("    Xlist::%s:  after:   bgn=%x, lst=%x, sz=%u, itm=%x.\n", __func__, begin, last, sz, item);
+			//print("    Xlist::%s:  after:   bgn=%x, lst=%x, sz=%zu, itm=%x.\n", __func__, begin, last, sz, item);
 			check(last);
 		}
 
-		inline void add(Item* pos, where_t where, Item* item)
+		inline void add(Item* pos, where_t where, Item* item, bool need_check = true)
 		{
-			//print("    Xlist::%s:  before:  bgn=%x, lst=%x, sz=%u, pos=%x, where=%s, new_itm=%x.\n",
+			//print("    Xlist::%s:  before:  bgn=%x, lst=%x, sz=%zu, pos=%x, where=%s, new_itm=%x.\n",
 			//	__func__, begin, last, sz, pos, where==Next?"next":"prev", item);
 
-			check(pos);
+			if (need_check)
+				check(pos);
 
 			if (!sz)
 			{
@@ -154,9 +160,10 @@ class list_t
 			}
 			sz++;
 
-			//print("    Xlist::%s:  after:   bgn=%x, lst=%x, sz=%u, pos_itm=%x, where=%s, new_itm=%x.\n",
+			//print("    Xlist::%s:  after:   bgn=%x, lst=%x, sz=%zu, pos_itm=%x, where=%s, new_itm=%x.\n",
 			//	__func__, begin, last, sz, pos, where==Next?"next":"prev", item);
-			check(last);
+			if (need_check)
+				check(last);
 		}
 
 		// find first (pos->data >= val) or NULL
@@ -188,7 +195,7 @@ private:
 	// put new items to free list
 	void add_mem(void* base, size_t sz)
 	{
-		print("  List::%p::%s:  items=%u, itemsz=%u, base=0x%p, sz=%u.\n",
+		print("  List::%p::%s:  items=%zu, itemsz=%zu, base=0x%p, sz=%zu.\n",
 			this, __func__, sz / sizeof(Item), sizeof(Item), base, sz);
 
 		// address must be alligned to 8 byte, cause type 'T' may contain
@@ -200,11 +207,15 @@ private:
 		while (rest >= sizeof(Item))
 		{
 			Item* cur = (Item*)addr;
-			free.add(free.last, Next, cur);
+			free.add(free.last, Next, cur, false);  // false - don't check correctness, it is too long
 			addr += sizeof(Item);
 			rest -= sizeof(Item);
-			//print("    List::%s:  added new item:  prev=0x%x, cur=0x%x, next=0x%x.\n", __func__, cur->prev, cur, cur->next);
+			//print("    List::%s:  added new item:  prev=0x%p, cur=0x%p, next=0x%p.\n", __func__, cur->prev, cur, cur->next);
 		}
+		#ifdef DEBUG
+		check(__func__);
+		#endif
+		print("  List::%p::%s:  done.\n", this, __func__);
 	}
 
 	inline bool check_for_alloc()
@@ -297,13 +308,13 @@ public:
 	{
 		print("  List::%p::%s:  hello.\n", this, __func__);
 		add_mem(local_buf, sizeof(local_buf));
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 	}
 
 	list_t(void* mem, size_t sz, list_dprint_t dbg_print = List_no_dprint) :
 		dprint(dbg_print), malloc_func(0)
 	{
-		print("  List::%p::%s:  hello, mem=0x%x, sz=%u.\n", this, __func__, mem, sz);
+		print("  List::%p::%s:  hello, mem=0x%x, sz=%zu.\n", this, __func__, mem, sz);
 		add_mem(local_buf, sizeof(local_buf));
 		add_mem(mem, sz);
 	}
@@ -313,13 +324,13 @@ private:
 	// XXX:  wa
 	void init(list_dprint_t dbg_print = List_no_dprint)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		dprint = dbg_print;
 		malloc_func = 0;
 		add_mem(local_buf, sizeof(local_buf));
 
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 	}
 
 public:
@@ -383,7 +394,7 @@ public:
 	// XXX:  non standart - call ctor instead of copy data
 	T& push_back()
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		check_for_alloc();
 
@@ -392,7 +403,7 @@ public:
 		busy.add(busy.last, Next, item);
 		new (&item->data) T;
 
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u, add data=%x.\n",
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu, add data=%p.\n",
 			this, __func__, free.sz, busy.sz, &item->data);
 
 		return item->data;
@@ -400,7 +411,7 @@ public:
 
 	void push_back(const T& val)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		check_for_alloc();
 
@@ -409,13 +420,13 @@ public:
 		busy.add(busy.last, Next, item);
 		item->data = val;
 
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u, add data=%p.\n",
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu, add data=%p.\n",
 			this, __func__, free.sz, busy.sz, &item->data);
 	}
 
 	iter_t insert_before(iter_t pos, const T& val)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		check_for_alloc();
 
@@ -425,14 +436,14 @@ public:
 		busy.add(pos_item, Prev, new_item);
 		new_item->data = val;
 
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		return iter_t(new_item);
 	}
 
 	iter_t insert_after(iter_t pos, const T& val)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		check_for_alloc();
 
@@ -447,7 +458,7 @@ public:
 
 	iter_t insert_sort(const T& val)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		check_for_alloc();
 
@@ -465,7 +476,7 @@ public:
 
 	iter_t erase(iter_t pos)
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		wassert(busy.sz);
 
@@ -482,13 +493,13 @@ public:
 	// TODO:  may be optimized, I suppose
 	void clear()
 	{
-		print("  List::%p::%s:  before:  free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 
 		iter_t it = begin();
 		while (it != end())
 			it = erase(it);
 
-		print("  List::%p::%s:  after:   free.sz=%u, busy.sz=%u.\n", this, __func__, free.sz, busy.sz);
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 	}
 
 	T& front() {  wassert(busy.sz);  return busy.begin->data;  }

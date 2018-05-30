@@ -37,8 +37,8 @@ L4_clock_t l4_system_clock();
 void       l4_thread_switch(L4_thrid_t dest);
 int        l4_schedule(L4_thrid_t dest, word_t time_ctl, word_t proc_ctl, word_t prio,
                        word_t preempt_ctl, word_t* state=0, word_t* ret_time_ctl=0);
-int        l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp=0, word_t* ip=0, word_t* flags=0,
-                    L4_thrid_t* pager=0, word_t* usr_def_handle=0);
+int        l4_exchange_registers(L4_thrid_t* dest, word_t ctrl, word_t* sp=0, word_t* ip=0,
+                                 word_t* flags=0, L4_thrid_t* pager=0, word_t* usr_def_handle=0);
 int        l4_kdb(word_t opcode, word_t param, void* buf=0, size_t sz=0);
 
 #ifdef __cplusplus
@@ -58,13 +58,13 @@ static inline int l4_exreg_ip(L4_thrid_t dest, word_t* ip_new, word_t* ip_old)
 		return -1;
 
 	if (!ip_new)  // only read ip_old
-		return l4_exreg(&dest, L4_exreg_ctl_d, 0, ip_old);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_d, 0, ip_old);
 
 	if (!ip_old)  // only write ip_new
-		return l4_exreg(&dest, L4_exreg_ctl_i, 0, ip_new);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_i, 0, ip_new);
 
 	*ip_old = *ip_new;
-	return l4_exreg(&dest, L4_exreg_ctl_d | L4_exreg_ctl_i, 0, ip_old);
+	return l4_exchange_registers(&dest, L4_exreg_ctl_d | L4_exreg_ctl_i, 0, ip_old);
 }
 
 static inline int l4_exreg_flags(L4_thrid_t dest, word_t* flags_new, word_t* flags_old)
@@ -73,13 +73,13 @@ static inline int l4_exreg_flags(L4_thrid_t dest, word_t* flags_new, word_t* fla
 		return -1;
 
 	if (!flags_new)  // only read flags_old
-		return l4_exreg(&dest, L4_exreg_ctl_d, 0, 0, flags_old);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_d, 0, 0, flags_old);
 
 	if (!flags_old)  // only write flags_new
-		return l4_exreg(&dest, L4_exreg_ctl_f, 0, 0, flags_new);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_f, 0, 0, flags_new);
 
 	*flags_old = *flags_new;
-	return l4_exreg(&dest, L4_exreg_ctl_d | L4_exreg_ctl_f, 0, 0, flags_old);
+	return l4_exchange_registers(&dest, L4_exreg_ctl_d | L4_exreg_ctl_f, 0, 0, flags_old);
 }
 
 static inline int l4_exreg_pager(L4_thrid_t dest, L4_thrid_t* pgr_new, L4_thrid_t* pgr_old)
@@ -88,13 +88,13 @@ static inline int l4_exreg_pager(L4_thrid_t dest, L4_thrid_t* pgr_new, L4_thrid_
 		return -1;
 
 	if (!pgr_new)  // only read pgr_old
-		return l4_exreg(&dest, L4_exreg_ctl_d, 0, 0, 0, pgr_old);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_d, 0, 0, 0, pgr_old);
 
 	if (!pgr_old)  // only write pgr_new
-		return l4_exreg(&dest, L4_exreg_ctl_p, 0, 0, 0, pgr_new);
+		return l4_exchange_registers(&dest, L4_exreg_ctl_p, 0, 0, 0, pgr_new);
 
 	*pgr_old = *pgr_new;
-	return l4_exreg(&dest, L4_exreg_ctl_d | L4_exreg_ctl_p, 0, 0, 0, pgr_old);
+	return l4_exchange_registers(&dest, L4_exreg_ctl_d | L4_exreg_ctl_p, 0, 0, 0, pgr_old);
 }
 
 // TODO

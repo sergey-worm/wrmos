@@ -18,6 +18,7 @@ arch         = sparc
 cpu          = leon3
 plat         = tsim
 brd          = tsim_leon3
+max_cpus     = 1
 sys_clock_hz = 125000000
 ram_start    = 0x40000000
 ram_sz       = 0x800000

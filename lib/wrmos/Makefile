@@ -31,7 +31,7 @@ cxxflags  := -std=c++11 -fno-rtti -fno-exceptions
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
-#else
+else
   baseflags += -DNDEBUG
 endif
 

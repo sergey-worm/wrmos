@@ -7,10 +7,10 @@ extern "C" {
 
 #ifdef Cfg_klog
 void printk(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void printk_notime(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void printk_tmr_pend(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 #else
 #define printk(...) do {} while (0)
-#define printk_notime(...) do {} while (0)
+#define printk_tmr_pend(...) do {} while (0)
 #endif
 
 void force_printk(const char* fmt, ...) __attribute__((format(printf, 1, 2)));

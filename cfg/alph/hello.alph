@@ -10,14 +10,17 @@ MEMORY
 # applications
 APPLICATIONS
 	{
-		name:         hello
-		short_name:   hell
-		file_path:    ramfs:/hello.elf
-		stack_size:   0x1000
-		aspaces_max:  1
-		threads_max:  3
-		prio_max:     100
+		name:             hello
+		short_name:       hell
+		file_path:        ramfs:/hello.elf
+		stack_size:       0x1000
+		heap_size:        0x0
+		aspaces_max:      1
+		threads_max:      3
+		prio_max:         100
+		fpu:              off
+		malloc_strategy:  on_startup
 		devices:
 		memory:
-		args:         arg1=123, arg2=345
+		args:             arg1=123, arg2=345
 	}

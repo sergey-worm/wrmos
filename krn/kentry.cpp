@@ -11,6 +11,7 @@
 #include "l4_syscalls.h"
 #include "threads.h"
 #include "kuart.h"
+#include <assert.h>
 
 void process_pfault(Thread_t* fault_thr, word_t fault_addr, word_t fault_access, word_t fault_inst);
 void process_exception(Thread_t* fault_thr, int exc_type, word_t pfault_addr_and_acc);
@@ -202,21 +203,22 @@ void kentry_irq(unsigned irq)
 {
 	Thread_t* cur = Sched_t::current();
 	Entry_frame_t* eframe = cur->entry_frame();
-	printk_notime("irq:  %s:  inst=0x%lx, irq=%u.\n", cur->name(), eframe->entry_pc(), irq);
 	//eframe->dump(printf, false);
 	(void)eframe;
 
 	Intc::clear(irq);
 	if (irq == Cfg_krn_timer_irq)
 	{
+		printk_tmr_pend("irq:  %s:  inst=0x%lx, irq=%u.\n", cur->name(), eframe->entry_pc(), irq);
 		Timer::irq_ack();
 		Intc::eoi(irq);
 		kern_timer_tick();
 	}
 	else
 	{
+		printk("irq:  %s:  inst=0x%lx, irq=%u.\n", cur->name(), eframe->entry_pc(), irq);
 		// route irq to waiting thread
-		Intc::mask(irq);  // disable interrupt until it re-enable msg
+		Intc::mask(irq);  // disable interrupt until it be re-enables by re-enable msg
 		Int_thread_t* ithr = Threads_t::int_thread(irq);
 		assert(ithr);
 		L4_thrid_t h = ithr->handler();

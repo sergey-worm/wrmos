@@ -9,6 +9,7 @@
 #include "wrm_log.h"
 #include "wrm_labels.h"
 #include "l4_api.h"
+#include "l4_thrid.h"
 #include "sys_stack.h"
 #include "wlibc_panic.h"
 #include "wlibc_assert.h"
@@ -60,9 +61,9 @@ extern "C" void thread_startup(long flags, thread_entry_t entry, long arg)
 	// enable fpu if need
 	if (flags)
 	{
-		int rc = wrm_thread_flags(l4_utcb()->local_id(), flags);
+		int rc = l4_exreg_flags(l4_utcb()->local_id(), (word_t*)&flags, NULL);
 		if (rc)
-			panic("wrm_thread_flags(fpu) - rc=%u.\n", rc);
+			panic("l4_exreg_flags(fpu) - rc=%u.\n", rc);
 	}
 
 	int rc = entry(arg);
@@ -71,19 +72,10 @@ extern "C" void thread_startup(long flags, thread_entry_t entry, long arg)
 	l4_kdb("Thread terminated");
 }
 
-extern "C" int wrm_thread_flags(L4_thrid_t id, word_t flags)
-{
-	// set flags via Exchange Registers
-	int rc = l4_exreg(&id, L4_exreg_ctl_f, 0 /*sp*/, 0 /*ip*/, &flags);
-	if (rc)
-		wrm_loge("%s:  l4_exreg() - rc=%d.\n", __func__, rc);
-	return rc;
-}
-
 // send thread-create request to alpha
-extern "C" int wrm_thread_create2(L4_fpage_t utcb_location, thread_entry_t entry, int arg, addr_t stack,
-                                  size_t stack_sz, unsigned prio, const char* short_name, word_t flags,
-                                  L4_thrid_t* id, L4_thrid_t space, L4_thrid_t sched, L4_thrid_t pager)
+extern "C" int wrm_thread_create(L4_fpage_t utcb_location, thread_entry_t entry, int arg, addr_t stack,
+                                 size_t stack_sz, unsigned prio, const char* short_name, word_t flags,
+                                 L4_thrid_t* id, L4_thrid_t space, L4_thrid_t sched, L4_thrid_t pager)
 {
 	L4_utcb_t* utcb = l4_utcb();
 
@@ -109,7 +101,7 @@ extern "C" int wrm_thread_create2(L4_fpage_t utcb_location, thread_entry_t entry
 
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
-	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
+	const L4_thrid_t alpha = l4_thrid_roottask();
 	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
@@ -126,7 +118,7 @@ extern "C" int wrm_thread_create2(L4_fpage_t utcb_location, thread_entry_t entry
 		!(tag.untyped() == 2  &&  tag.typed() == 0))        // ecode and thrid
 	{
 		wrm_loge("%s:  Wrm_ipc_create_thread wrong reply format:  alph=%d, lbl=%d, t=%u, u=%u.\n",
-			__func__, alpha==from, tag.ipc_label()==Wrm_ipc_map_io, tag.typed(), tag.untyped());
+			__func__, alpha==from, tag.ipc_label()==Wrm_ipc_create_thread, tag.typed(), tag.untyped());
 		return 2;
 	}
 
@@ -192,7 +184,7 @@ extern "C" int wrm_task_create(L4_fpage_t utcbs_area, thread_entry_t entry, int 
 
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
-	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
+	const L4_thrid_t alpha = l4_thrid_roottask();
 	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from); // send and receive
 	if (rc)
 	{
@@ -209,7 +201,7 @@ extern "C" int wrm_task_create(L4_fpage_t utcbs_area, thread_entry_t entry, int 
 		!(tag.untyped() == 2  &&  tag.typed() == 0))        // ecode and thrid
 	{
 		wrm_loge("%s:  Wrm_ipc_create_thread wrong reply format:  alph=%d, lbl=%d, t=%u, u=%u.\n",
-			__func__, alpha==from, tag.ipc_label()==Wrm_ipc_map_io, tag.typed(), tag.untyped());
+			__func__, alpha==from, tag.ipc_label()==Wrm_ipc_create_task, tag.typed(), tag.untyped());
 		return 2;
 	}
 

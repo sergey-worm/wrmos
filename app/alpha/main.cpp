@@ -5,6 +5,7 @@
 //##################################################################################################
 
 #include "l4_api.h"
+#include "l4_thrid.h"
 #include "wrmos.h"
 #include "list.h"
 #include "elfloader.h"
@@ -23,29 +24,52 @@
 //--------------------------------------------------------------------------------------------------
 // Cfg
 //--------------------------------------------------------------------------------------------------
-class Mmio_device_t
+class Io_device_t
 {
-	enum { Name_sz = 12 };
 public:
-	char     name [Name_sz];
-	paddr_t  pa;
-	psize_t  sz;
-	unsigned irq;
 
-	static const Mmio_device_t* next(const Mmio_device_t* cur)
+	enum { Name_sz = 12 };
+
+private:
+
+	char     _name[Name_sz];
+	paddr_t  _pa;  // may include iomem_addr (0xfffff000) and ioport_addr (0xfff)
+	psize_t  _sz;  // may include iomem_sz   (0xfffffff0) and ioport_sz   (0xf)
+	unsigned _irq;
+
+public:
+
+
+	static const Io_device_t* next(const Io_device_t* cur)
 	{
-		const Mmio_device_t* next = cur + 1;
-		return next->name[0] != 0  ?  next  :  0;
+		const Io_device_t* next = cur + 1;
+		return next->_name[0] != 0  ?  next  :  0;
 	}
+
+	void name(const char* s, unsigned l) { strncpy(_name, s, l); }
+	void pa(paddr_t v)       { _pa = v; }
+	void sz(psize_t v)       { _sz = v; }
+	void irq(unsigned v)     { _irq = v; }
+
+	const char* name()     const { return _name; }
+	paddr_t  pa()          const { return _pa; }
+	psize_t  sz()          const { return _sz; }
+	paddr_t  iomem_addr()  const { return round_down(_pa, 0x1000); }
+	psize_t  iomem_sz()    const { return round_down(_sz, 0x10); }
+	paddr_t  iomem_end()   const { return iomem_addr() + iomem_sz(); }
+	unsigned ioport_addr() const { return get_offset(_pa, 0x1000); }
+	unsigned ioport_sz()   const { return get_offset(_sz, 0x10); }
+	unsigned ioport_end()  const { return ioport_addr() + ioport_sz(); }
+	unsigned irq()         const { return _irq; }
 };
 
 class Board_cfg_t
 {
 public:
 	enum { Devs_max = 12 };
-	Mmio_device_t devices [Devs_max];
+	Io_device_t devices [Devs_max];
 
-	const Mmio_device_t* devices_begin() const { return devices; }
+	const Io_device_t* devices_begin() const { return devices; }
 };
 
 class Memory_region_t
@@ -84,7 +108,7 @@ public:
 
 static Proj_cfg_t parsed_proj_cfg;
 
-const bool parse_dev_config(const char* str, Mmio_device_t* devs, unsigned list_sz)
+const bool parse_dev_config(const char* str, Io_device_t* devs, unsigned list_sz)
 {
 	bool inside_section = false;
 	const char* line = str;
@@ -134,18 +158,17 @@ const bool parse_dev_config(const char* str, Mmio_device_t* devs, unsigned list_
 					return false;
 				}
 
-				if (word_len[0] >= sizeof(devs[cnt].name))
+				if (word_len[0] >= Io_device_t::Name_sz)
 				{
-					wrm_loge("wrong dev cfg (%u):  too big device name, max=%zu.\n",
-						line_cnt, sizeof(devs[cnt].name) - 1);
+					wrm_loge("wrong dev cfg (%u):  too big device name, max=%u.\n",
+						line_cnt, Io_device_t::Name_sz - 1);
 					return false;
 				}
 
-				strncpy(devs[cnt].name, word_ptr[0], word_len[0]);
-				devs[cnt].pa  = !strncmp(word_ptr[1], "krn", 3) ? Cfg_krn_uart_paddr : strtoul(word_ptr[1], 0, 16);
-				devs[cnt].sz  = !strncmp(word_ptr[2], "krn", 3) ? Cfg_krn_uart_sz    : strtoul(word_ptr[2], 0, 16);
-				devs[cnt].irq = !strncmp(word_ptr[3], "krn", 3) ? Cfg_krn_uart_irq   : strtoul(word_ptr[3], 0, 10);
-
+				devs[cnt].name(word_ptr[0], word_len[0]);
+				devs[cnt].pa( !strncmp(word_ptr[1], "krn", 3) ? Cfg_krn_uart_paddr : strtoul(word_ptr[1], 0, 16));
+				devs[cnt].sz( !strncmp(word_ptr[2], "krn", 3) ? Cfg_krn_uart_sz    : strtoul(word_ptr[2], 0, 16));
+				devs[cnt].irq(!strncmp(word_ptr[3], "krn", 3) ? Cfg_krn_uart_irq   : strtoul(word_ptr[3], 0, 10));
 				cnt++;
 			}
 		}
@@ -280,17 +303,19 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 				// parse app section line by line
 
 				//	{
-				//		name:         greth
-				//		short_name:   eth
-				//		file_path:    ramfs:/greth
-				//		stack_size:   0x1000
-				//		aspace_max:   1
-				//		threads_max:  3
-				//		prio_max:     150
-				//		fpu:          1
-				//		devices:      greth
-				//		memory:       greth_mem
-				//		args:
+				//		name:             greth
+				//		short_name:       eth
+				//		file_path:        ramfs:/greth
+				//		stack_size:       0x1000
+				//		heap_size:        0x1000
+				//		aspace_max:       1
+				//		threads_max:      3
+				//		prio_max:         150
+				//		fpu:              1
+				//		malloc_strategy:  on_startup | on_pagefault
+				//		devices:          greth
+				//		memory:           greth_mem
+				//		args:             arg1 arg2
 				//	}
 
 				if (!inside_app)
@@ -356,6 +381,15 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 							}
 							apps[app_cnt].stack_sz = strtoul(val_start, 0, 16);
 						}
+						else if (!strncmp(line, "\t\theap_size:", 12))
+						{
+							if (!val_len)
+							{
+								wrm_loge("wrong app cfg (%u):  'heap_size' absent.\n", line_cnt);
+								return false;
+							}
+							apps[app_cnt].heap_sz = strtoul(val_start, 0, 16);
+						}
 						else if (!strncmp(line, "\t\taspaces_max:", 14))
 						{
 							if (!val_len)
@@ -415,6 +449,24 @@ const bool parse_app_config(const char* str, Wrm_app_cfg_t* apps, unsigned list_
 							else
 							{
 								wrm_loge("wrong app cfg (%u):  'fpu' must be 'on' or 'off'.\n", line_cnt);
+								return false;
+							}
+						}
+						else if (!strncmp(line, "\t\tmalloc_strategy:", 15))
+						{
+							if (!val_len)
+							{
+								wrm_loge("wrong app cfg (%u):  'malloc_strategy' absent.\n", line_cnt);
+								return false;
+							}
+							if (!strncmp(val_start, "on_startup", val_len))
+								apps[app_cnt].malloc_strategy = Wrm_app_cfg_t::Malloc_on_startup;
+							else if (!strncmp(val_start, "on_pagefault", val_len))
+								apps[app_cnt].malloc_strategy = Wrm_app_cfg_t::Malloc_on_pagefault;
+							else
+							{
+								wrm_loge("wrong app cfg (%u):  'malloc_strategy' must be 'on_startup' "
+									"or 'on_pagefault'.\n", line_cnt);
 								return false;
 							}
 						}
@@ -567,12 +619,12 @@ const Proj_cfg_t* app_config()
 int get_dev_index(const Proj_cfg_t* proj_cfg, const char* name)
 {
 	int cnt = 0;
-	const Mmio_device_t* dev = proj_cfg->brd.devices_begin();
+	const Io_device_t* dev = proj_cfg->brd.devices_begin();
 	while (dev)
 	{
-		if (!strcmp(dev->name, name))
+		if (!strcmp(dev->name(), name))
 			return cnt;
-		dev = Mmio_device_t::next(dev);
+		dev = Io_device_t::next(dev);
 		cnt++;
 	}
 	return -1;
@@ -597,13 +649,13 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 	wrm_logi("Project config:\n");
 	wrm_logi("  Board config:\n");
 	wrm_logi("    ##  device    paddr        size        irq\n");
-	const Mmio_device_t* dev = proj_cfg->brd.devices_begin();
+	const Io_device_t* dev = proj_cfg->brd.devices_begin();
 	unsigned cnt = 0;
-	while (dev && *dev->name)
+	while (dev && *dev->name())
 	{
 		wrm_logi("    %2u  %-8s  0x%08llx   0x%08llx  %3d\n",
-			cnt, dev->name, (long long)dev->pa, (long long)dev->sz, dev->irq);
-		dev = Mmio_device_t::next(dev);
+			cnt, dev->name(), (long long)dev->pa(), (long long)dev->sz(), dev->irq());
+		dev = Io_device_t::next(dev);
 		cnt++;
 	}
 	wrm_logi("  Memory config:\n");
@@ -674,17 +726,19 @@ void print_proj_config(const Proj_cfg_t* proj_cfg)
 		}
 
 		wrm_logi("    [%u]\n", cnt);
-		wrm_logi("      name:         %s\n", app->name);
-		wrm_logi("      short_name:   %s\n", app->short_name);
-		wrm_logi("      file:         %s\n", app->filename);
-		wrm_logi("      stack_sz:     0x%x\n", app->stack_sz);
-		wrm_logi("      max_aspaces:  %u\n", app->max_aspaces);
-		wrm_logi("      max_threads:  %u\n", app->max_threads);
-		wrm_logi("      max_prio:     %u\n", app->max_prio);
-		wrm_logi("      fpu:          %u\n", app->fpu);
-		wrm_logi("      devices:      %s\n", devs_str);
-		wrm_logi("      memory:       %s\n", mems_str);
-		wrm_logi("      args:         %s\n", args_str);
+		wrm_logi("      name:             %s\n", app->name);
+		wrm_logi("      short_name:       %s\n", app->short_name);
+		wrm_logi("      file:             %s\n", app->filename);
+		wrm_logi("      stack_sz:         0x%x\n", app->stack_sz);
+		wrm_logi("      heap_sz:          0x%zx\n", app->heap_sz);
+		wrm_logi("      max_aspaces:      %u\n", app->max_aspaces);
+		wrm_logi("      max_threads:      %u\n", app->max_threads);
+		wrm_logi("      max_prio:         %u\n", app->max_prio);
+		wrm_logi("      fpu:              %u\n", app->fpu);
+		wrm_logi("      malloc_strategy:  %s\n", app->malloc_strategy_str());
+		wrm_logi("      devices:          %s\n", devs_str);
+		wrm_logi("      memory:           %s\n", mems_str);
+		wrm_logi("      args:             %s\n", args_str);
 
 		cnt++;
 		app = Wrm_app_cfg_t::next(app);
@@ -827,7 +881,7 @@ static Named_memory_regions_t named_memory;
 //  ~ Named memory regions
 //--------------------------------------------------------------------------------------------------
 
-static int next_thread_id = l4_kip()->thread_info.user_base() + 2; // +0 sigma0, +1 alpha
+static int next_thread_no = l4_kip()->thread_info.user_base() + 2; // +0 sigma0, +1 alpha
 
 // Sigma0 protocol
 void get_memory_from_sigma0()
@@ -835,17 +889,12 @@ void get_memory_from_sigma0()
 	wrm_logi("get memory from sigma0.\n");
 
 	L4_utcb_t* utcb = l4_utcb();
-	const L4_thrid_t sgm0  = L4_thrid_t::create_global(l4_kip()->thread_info.user_base(), 1);
+	const L4_thrid_t sgm0  = l4_thrid_sigma0();
 
 	size_t req_size = 0x80000000; // 2GB
 
 	while (1)
 	{
-		L4_msgtag_t tag;
-		tag.proto_label(L4_msgtag_t::Sigma0);
-		tag.propagated(false);
-		tag.untyped(2);
-		tag.typed(0);
 		utcb->acceptor(L4_acceptor_t(L4_fpage_t::create_complete(), false));
 
 		L4_fpage_t req_fpage = L4_fpage_t::create(0, req_size, L4_fpage_t::Acc_rwx);
@@ -853,16 +902,18 @@ void get_memory_from_sigma0()
 		req_fpage.base(-1);
 		word_t req_attr = 0; // arch dependent attribs, 0 - default
 
+		L4_msgtag_t tag;
+		tag.set_proto(L4_msgtag_t::Sigma0, 2, 0);
 		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = req_fpage.raw();
 		utcb->mr[2] = req_attr;
 
 		L4_thrid_t from = L4_thrid_t::Nil;
 		L4_time_t never(L4_time_t::Never);
-		int res = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), &from);
-		if (res)
+		int rc = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), &from);
+		if (rc)
 		{
-			wrm_logi("l4_ipc(sgm0) failed, res=%u.\n", res);
+			wrm_logi("l4_ipc(sgm0) - rc=%u.\n", rc);
 			l4_kdb("Sending grant/map item is failed");
 		}
 
@@ -871,8 +922,8 @@ void get_memory_from_sigma0()
 		word_t mr[L4_utcb_t::Mr_words];
 		memcpy(mr, utcb->mr, (1 + tag.untyped() + tag.typed()) * sizeof(word_t));
 
-		//wrm_logi("rx:  from=0x%x/%u, tag=0x%x, u=%u, t=%u, mr[1]=0x%x, mr[2]=0x%x.\n",
-		//	from.raw(), from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
+		//wrm_logd("rx:  from=%u, tag=0x%lx, u=%u, t=%u, mr[1]=0x%lx, mr[2]=0x%lx.\n",
+		//	from.number(), tag.raw(), tag.untyped(), tag.typed(), mr[1], mr[2]);
 
 		assert(tag.untyped() == 0);
 		assert(tag.typed() == 2);
@@ -888,14 +939,14 @@ void get_memory_from_sigma0()
 		if (!mitem->snd_base()  &&  fpage.is_nil())
 		{
 			// map reject
-			//wrm_logi("map reject.\n");
+			//wrm_logd("map reject.\n");
 			if (req_size == Cfg_page_sz)
 				break;
 			req_size >>= 1;
 			continue;
 		}
 
-		//wrm_logi("rcv memory:  addr=%#x, sz=%#x.\n", fpage.addr(), fpage.size());
+		//wrm_logd("rcv memory:  addr=%#x, sz=%#x.\n", fpage.addr(), fpage.size());
 
 		memset((void*)fpage.addr(), 0, fpage.size());  // to check unmapped addresses
 		wrm_mpool_add(fpage);
@@ -923,15 +974,12 @@ int make_not_cached(L4_fpage_t* fpages, size_t num)
 int do_iospace_request(L4_fpage_t iospace)
 {
 	L4_utcb_t* utcb = l4_utcb();
-	const L4_thrid_t sgm0  = L4_thrid_t::create_global(l4_kip()->thread_info.user_base(), 1);
+	const L4_thrid_t sgm0  = l4_thrid_sigma0();
 
 	L4_msgtag_t tag;
-	tag.proto_label(L4_msgtag_t::Sigma0);
-	tag.propagated(false);
-	tag.untyped(2);
-	tag.typed(0);
+	tag.set_proto(L4_msgtag_t::Sigma0, 2, 0);
 	utcb->acceptor().set(L4_fpage_t::create_complete(), false);
-	utcb->mr[0] = tag.raw();;
+	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = iospace.raw();
 	utcb->mr[2] = 0; // req_attribs - arch dependent, 0 - default
 	L4_thrid_t from = L4_thrid_t::Nil;
@@ -939,7 +987,7 @@ int do_iospace_request(L4_fpage_t iospace)
 	int rc = l4_ipc(sgm0, sgm0, L4_timeouts_t(never, never), &from);
 	if (rc)
 	{
-		wrm_loge("l4_ipc(sgm0) failed, rc=%u.\n", rc);
+		wrm_loge("l4_ipc(sgm0) - rc=%u.\n", rc);
 		return -1;
 	}
 
@@ -959,7 +1007,6 @@ int do_iospace_request(L4_fpage_t iospace)
 
 	L4_map_item_t* mitem = (L4_map_item_t*) item;
 	L4_fpage_t fpage = mitem->fpage();
-
 	assert(!fpage.is_complete());
 
 	if (!mitem->snd_base()  &&  fpage.is_nil())
@@ -970,11 +1017,14 @@ int do_iospace_request(L4_fpage_t iospace)
 
 	//wrm_logd("rcv iospace:  addr=%#lx, sz=%#lx.\n", fpage.addr(), fpage.size());
 
-	rc = make_not_cached(&fpage, 1);
-	if (rc)
+	if (!fpage.is_io())
 	{
-		wrm_loge("make_not_cached() failed, rc=%d.\n", rc);
-		return -3;
+		rc = make_not_cached(&fpage, 1);
+		if (rc)
+		{
+			wrm_loge("make_not_cached() - rc=%d.\n", rc);
+			return -3;
+		}
 	}
 
 	return 0;
@@ -984,26 +1034,46 @@ void get_iospace_from_sigma0(const Proj_cfg_t* proj_cfg)
 {
 	wrm_logi("get iospace from sigma0.\n");
 
-	const Mmio_device_t* dev = app_config()->brd.devices_begin();
-	while (dev && *dev->name)
+	const Io_device_t* dev = app_config()->brd.devices_begin();
+	while (dev && *dev->name())
 	{
-		// map ioarea page by page
-		const paddr_t pa_first = round_pg_down(dev->pa);
-		const paddr_t pa_final = round_pg_down(dev->pa + dev->sz - 1);
-		//wrm_logd("Map IOspace:  %s:  0x%llx - 0x%llx.\n", dev->name, pa_first, pa_final);
-		for (paddr_t pa=pa_first; pa<=pa_final; pa+=Cfg_page_sz)
+		// map io-ports
+		if (dev->ioport_sz())
 		{
-			//wrm_logd("Map IOspace page:  %s:  0x%llx.\n", dev->name, pa);
-			L4_fpage_t io = L4_fpage_t::create(pa, Cfg_page_sz, Acc_rw);
+			unsigned port_base = dev->ioport_addr();
+			unsigned port_sz = dev->ioport_sz();
+			//wrm_logd("Map IO-ports:  %s:  port=0x%x, sz=%u.\n", dev->name(), port_base, port_sz);
+			L4_fpage_t io = L4_fpage_t::create_io(port_base, port_sz);
 			assert(!io.is_nil());
 			int rc = do_iospace_request(io);
 			if (rc)
 			{
-				wrm_loge("Could not get iospace from Sigma0 '%s'.\n", dev->name);
-				panic("do_iospace_request() failed.");
+				wrm_loge("Could not get io-port from Sigma0 '%s'.\n", dev->name());
+				panic("do_iospace_request() - rc=%d.", rc);
 			}
 		}
-		dev = Mmio_device_t::next(dev);
+
+		// map io-mem page by page
+		if (dev->iomem_sz())
+		{
+			paddr_t pa_first = round_pg_down(dev->iomem_addr());
+			paddr_t pa_final = round_pg_down(dev->iomem_addr() + dev->iomem_sz() - 1);
+			//wrm_logd("Map IO-mem:    %s:  (0x%llx - 0x%llx].\n", dev->name(),
+			//	(long long)pa_first, (long long)pa_final);
+			for (paddr_t pa=pa_first; pa<=pa_final; pa+=Cfg_page_sz)
+			{
+				//wrm_logd("Map IO-mem page:  %s:  0x%llx.\n", dev->name(), pa);
+				L4_fpage_t io = L4_fpage_t::create(pa, Cfg_page_sz, Acc_rw);
+				assert(!io.is_nil());
+				int rc = do_iospace_request(io);
+				if (rc)
+				{
+					wrm_loge("Could not get io-mem from Sigma0 '%s'.\n", dev->name());
+					panic("do_iospace_request() - rc=%d.", rc);
+				}
+			}
+		}
+		dev = Io_device_t::next(dev);
 	}
 	wrm_logi("got iospace from sigma0.\n");
 }
@@ -1030,7 +1100,7 @@ void prepare_named_memory_regions(const Proj_cfg_t* proj_cfg)
 		L4_fpage_t location = wrm_mpool_alloc(mem->sz);
 		if (location.is_nil())
 		{
-			wrm_loge("Could not allocate 0x%zx bytes fot named memory '%s'.\n", mem->sz, mem->name);
+			wrm_loge("Could not allocate 0x%zx bytes for named memory '%s'.\n", mem->sz, mem->name);
 			wrm_mpool_dump();
 			panic("Could not allocate memory.");
 		}
@@ -1045,7 +1115,7 @@ void prepare_named_memory_regions(const Proj_cfg_t* proj_cfg)
 		int rc = make_not_cached(&location, 1);
 		if (rc)
 		{
-			wrm_loge("make_not_cached() failed, rc=%d.\n", rc);
+			wrm_loge("make_not_cached() - rc=%d.\n", rc);
 			panic("Could not set memory attribs.");
 		}
 
@@ -1182,7 +1252,7 @@ static void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 	// find local address for fault address
 	L4_fpage_t local_fpage;
-	int rc = wrm_app_location(from, addr, sizeof(word_t), acc, &local_fpage);
+	int rc = wrm_app_get_location(from, addr, sizeof(word_t), acc, &local_fpage);
 	if (rc == -2) // location not found
 	{
 		//wrm_logd("pager could not resolve pfault:  thr=%u, va=0x%lx, acc=%d, inst=0x%lx.\n",
@@ -1191,7 +1261,7 @@ static void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	}
 	else if (rc)
 	{
-		wrm_loge("wrm_app_location(addr=0x%lx, acc=%d) - rc=%d, thr=%u, inst=0x%lx.\n",
+		wrm_loge("wrm_app_get_location(addr=0x%lx, acc=%d) - rc=%d, thr=%u, inst=0x%lx.\n",
 			addr, acc, rc, from.number(), inst);
 		l4_kdb("unexpected error, roottask internal error");
 	}
@@ -1209,7 +1279,90 @@ static void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
+		l4_kdb("Sending grant/map item is failed");
+	}
+}
+
+static void process_io_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+{
+	// get io-pfault params
+	assert(tag.untyped() == 2);
+	assert(tag.typed() == 0);
+	L4_fpage_t fpage = L4_fpage_t::create(mr[1]);
+	assert(fpage.is_io());
+	word_t inst = mr[2];
+	wrm_logw("io-pfault from %u:  port=0x%lx, sz=0x%lx, inst=%lx.\n", from.number(),
+		fpage.io_port(), fpage.io_size(), inst);
+
+	assert(fpage.io_size() == 1);
+
+	// prepare result IO-fpage
+	L4_fpage_t res_fpage = fpage;
+
+	// check permission
+	bool perm_ok = false;
+	do
+	{
+		// find app cfg
+		const Wrm_app_cfg_t* cfg = app_config()->apps_begin();
+		unsigned from_num = from.number();
+		unsigned app_first_thread_num = l4_kip()->thread_info.user_base() + 2;
+		while (cfg)
+		{
+			if (from_num >= app_first_thread_num  &&
+			    from_num < (app_first_thread_num + cfg->max_threads))
+				break;
+			app_first_thread_num += cfg->max_threads;
+			cfg = Wrm_app_cfg_t::next(cfg);
+		}
+		if (!cfg)
+		{
+			wrm_loge("io-pfault:  no app for id=%u.\n", from.number());
+			break;
+		}
+
+		// check all devs from dev cfg
+		const Io_device_t* dev = app_config()->brd.devices_begin();
+		while (dev && !perm_ok)
+		{
+			const Wrm_app_cfg_t::dev_name_t* dname = cfg->devs;
+			while ((*dname)[0])
+			{
+				if (!strcmp(*dname, dev->name()))
+				{
+					if (fpage.io_port() >= dev->ioport_addr()  &&
+						(fpage.io_port() + fpage.io_size()) < dev->ioport_end())
+					{
+						//wrm_logd("io-pfault:  found device:  name=%s, ioport=0x%x, sz=%u.\n",
+						//	dev->name(), dev->ioport_addr(), dev->ioport_sz());
+						perm_ok = true;
+						break;
+					}
+				}
+				dname++;
+			}
+			dev = Io_device_t::next(dev);
+		}
+	} while (0);
+
+	if (!perm_ok)
+	{
+		wrm_loge("No permissions for ioport=0x%lx.\n", fpage.io_port());
+		res_fpage = L4_fpage_t::create_complete();  // to raise exception for fault thread
+	}
+
+	// grant/map
+	L4_map_item_t item = L4_map_item_t::create(res_fpage);
+	tag.set_ipc(0, 0, 2);
+	L4_utcb_t* utcb = l4_utcb();
+	utcb->mr[0] = tag.raw();
+	utcb->mr[1] = item.word0();
+	utcb->mr[2] = item.word1();
+	int rc = l4_send(from, L4_time_t::Never);
+	if (rc)
+	{
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
 }
@@ -1242,12 +1395,13 @@ void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	assert(tag.untyped() <= Dev_name_words_max);
 	assert(tag.typed() == 0);
 	const char* dev_name = (const char*)&mr[1];
-	//wrm_logi("map_io:  dev=%.*s.\n", Dev_name_len_max, dev_name);
+	//wrm_logd("map_io:  dev=%.*s.\n", Dev_name_len_max, dev_name);
 
 	int ecode = 0;
-	size_t offset = -1;
-	size_t size = -1;
-	L4_map_item_t mitem = L4_map_item_t::create(L4_fpage_t::create_nil());
+	size_t iomem_offset = 0;
+	size_t iomem_size = 0;
+	L4_fpage_t iomem = L4_fpage_t::create_nil();
+	L4_fpage_t ioport = L4_fpage_t::create_nil();
 	do
 	{
 		// find app cfg
@@ -1271,15 +1425,15 @@ void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 		// find dev cfg
 		bool ok = false;
-		const Mmio_device_t* dev = app_config()->brd.devices_begin();
+		const Io_device_t* dev = app_config()->brd.devices_begin();
 		while (dev)
 		{
-			if (!strncmp(dev->name, dev_name, Dev_name_len_max))
+			if (!strncmp(dev->name(), dev_name, Dev_name_len_max))
 			{
 				ok = true;
 				break;
 			}
-			dev = Mmio_device_t::next(dev);
+			dev = Io_device_t::next(dev);
 		}
 		if (!ok)
 		{
@@ -1307,40 +1461,49 @@ void process_map_io(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			break;
 		}
 
-		size_t sz = round_pg_down(dev->pa + dev->sz - 1) - round_pg_down(dev->pa) + Cfg_page_sz;
-		L4_fpage_t io = L4_fpage_t::create(round_pg_down(dev->pa), sz, Acc_rw);
-		assert(!io.is_nil());
-		mitem.set(io);
+		// map IO-mem if need
+		if (dev->iomem_sz())
+		{
+			size_t map_sz = round_pg_down(dev->iomem_end() - 1) - round_pg_down(dev->iomem_addr()) + Cfg_page_sz;
+			iomem = L4_fpage_t::create(round_pg_down(dev->iomem_addr()), map_sz, Acc_rw);
+			assert(!iomem.is_nil());
+			iomem_offset = get_pg_offset(dev->pa());
+			iomem_size = dev->iomem_sz();
+		}
 
-		offset = get_offset(dev->pa, Cfg_page_sz);
-		size = dev->sz;
+		// map IO-ports if need
+		if (dev->ioport_sz())
+		{
+			ioport = L4_fpage_t::create_io(dev->ioport_addr(), dev->ioport_sz());
+			assert(!ioport.is_nil());
+		}
 	} while (0);
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_map_io);
-	tag.propagated(false);
 	if (ecode)
 	{
-		tag.untyped(1);
-		tag.typed(0);
+		tag.set_ipc(Wrm_ipc_map_io, 1, 0);
 		utcb->mr[0] = tag.raw();;
 		utcb->mr[1] = ecode;
 	}
 	else
 	{
-		tag.untyped(2);
-		tag.typed(2);
+		tag.set_ipc(Wrm_ipc_map_io, 2, 4);
+		L4_map_item_t mitem_mem = L4_map_item_t::create(iomem);
+		L4_map_item_t mitem_port = L4_map_item_t::create(ioport);
 		utcb->mr[0] = tag.raw();;
-		utcb->mr[1] = offset;
-		utcb->mr[2] = size;
-		utcb->mr[3] = mitem.word0();
-		utcb->mr[4] = mitem.word1();
+		utcb->mr[1] = iomem_offset;
+		utcb->mr[2] = iomem_size;
+		utcb->mr[3] = mitem_mem.word0();
+		utcb->mr[4] = mitem_mem.word1();
+		utcb->mr[5] = mitem_port.word0();
+		utcb->mr[6] = mitem_port.word1();
 	}
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
 }
@@ -1382,15 +1545,15 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 
 		// find dev cfg
 		bool ok = false;
-		const Mmio_device_t* dev = app_config()->brd.devices_begin();
+		const Io_device_t* dev = app_config()->brd.devices_begin();
 		while (dev)
 		{
-			if (!strncmp(dev->name, dev_name, Dev_name_len_max))
+			if (!strncmp(dev->name(), dev_name, Dev_name_len_max))
 			{
 				ok = true;
 				break;
 			}
-			dev = Mmio_device_t::next(dev);
+			dev = Io_device_t::next(dev);
 		}
 		if (!ok)
 		{
@@ -1422,14 +1585,14 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 		L4_thrid_t space = L4_thrid_t::Nil;
 		L4_thrid_t sched = L4_thrid_t::Nil;
 		L4_thrid_t pager = action == Wrm_ipc_attach_int  ?  from  :  L4_thrid_t::Nil;
-		int rc = l4_thread_control(L4_thrid_t::create_global(dev->irq, 1), space, sched, pager, 0);
+		int rc = l4_thread_control(L4_thrid_t::create_irq(dev->irq()), space, sched, pager, 0);
 		if (rc)
 		{
-			wrm_loge("%s:  l4_thread_control() - failed, rc=%u.\n", __func__, rc);
+			wrm_loge("%s:  l4_thread_control() - rc=%u.\n", __func__, rc);
 			ecode = 4;  // internal error
 			break;
 		}
-		intno = dev->irq;
+		intno = dev->irq();
 	} while (0);
 
 	// send reply
@@ -1443,14 +1606,9 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send() failed, rc=%u.\n", rc);
+		wrm_loge("l4_send() - rc=%u.\n", rc);
 		l4_kdb("Sending attach/detach response is failed");
 	}
-}
-
-void process_usual_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
-{
-	panic("IMPLEMENT ME:  process_usual_memory_request.\n");
 }
 
 void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
@@ -1463,7 +1621,7 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	assert(tag.untyped() <= Mem_name_words_max);
 	assert(tag.typed() == 0);
 	const char* mem_name = (const char*)&mr[1];
-	//wrm_logi("request:  mem=%.*s.\n", Mem_name_len_max, mem_name);
+	//wrm_logd("nmem_req:  mem=%.*s.\n", Mem_name_len_max, mem_name);
 
 	int ecode = 0;
 	unsigned cached = -1;
@@ -1524,19 +1682,15 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 	// send reply
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_get_named_mem);
-	tag.propagated(false);
 	if (ecode)
 	{
-		tag.untyped(1);
-		tag.typed(0);
+		tag.set_ipc(Wrm_ipc_get_named_mem, 1, 0);
 		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = ecode;
 	}
 	else
 	{
-		tag.untyped(4);
-		tag.typed(2);
+		tag.set_ipc(Wrm_ipc_get_named_mem, 4, 2);
 		utcb->mr[0] = tag.raw();
 		utcb->mr[1] = 0;                     // MSW of paddr
 		utcb->mr[2] = mitem.fpage().addr();  // LSW of paddr
@@ -1548,7 +1702,94 @@ void process_named_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
+		l4_kdb("Sending grant/map item is failed");
+	}
+}
+
+void process_usual_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+{
+	assert(tag.untyped() == 2);
+	assert(tag.typed() == 0);
+	//wrm_logd("mem_req:  sz=0x%lx.\n", mr[1]);
+
+	addr_t rem_va = mr[1];
+	size_t req_sz = mr[2];
+	int ecode = 0;
+	L4_fpage_t location = L4_fpage_t::create_nil();
+	do
+	{
+		// find app cfg
+		const Wrm_app_cfg_t* cfg = app_config()->apps_begin();
+		unsigned from_num = from.number();
+		unsigned app_first_thread_num = l4_kip()->thread_info.user_base() + 2;
+		while (cfg)
+		{
+			if (from_num >= app_first_thread_num  &&
+			    from_num < (app_first_thread_num + cfg->max_threads))
+				break;
+			app_first_thread_num += cfg->max_threads;
+			cfg = Wrm_app_cfg_t::next(cfg);
+		}
+		if (!cfg)
+		{
+			wrm_loge("mem_req:  no app for thr=%u.\n", from.number());
+			ecode = 1;  // no app
+			break;
+		}
+
+		// check heap limit
+		if (req_sz > cfg->heap_sz)
+		{
+			//wrm_logd("mem_req:  heap not enough, req_sz=0x%zx, heap_sz=0x%zx.\n", req_sz, cfg->heap_sz);
+			ecode = 2;  // heap not enough
+			break;
+		}
+
+		// allocate memory
+		location = wrm_mpool_alloc(req_sz);
+		if (location.is_nil())
+		{
+			wrm_loge("mem_req:  wrm_mpool_alloc(0x%zx) - failed, mpool_sz=0x%zx.\n", req_sz, wrm_mpool_size());
+			ecode = 3;  // memory not enough
+			break;
+		}
+
+		// set location in alpha regions
+		int rc = wrm_app_add_location(from, rem_va, location);
+		if (rc)
+		{
+			wrm_loge("mem_req:  wrm_app_set_location() - rc=%d.\n", rc);
+			ecode = 4;  // may be vspace crossing
+			wrm_mpool_add(location);  // put back to mpool
+			break;
+		}
+
+		cfg->heap_sz -= req_sz;
+
+	} while (0);
+
+	L4_map_item_t mitem = L4_map_item_t::create(location);
+
+	// send reply
+	L4_utcb_t* utcb = l4_utcb();
+	if (ecode)
+	{
+		tag.set_ipc(Wrm_ipc_get_usual_mem, 1, 0);
+		utcb->mr[0] = tag.raw();
+		utcb->mr[1] = ecode;
+	}
+	else
+	{
+		tag.set_ipc(Wrm_ipc_get_usual_mem, 0, 2);
+		utcb->mr[0] = tag.raw();
+		utcb->mr[1] = mitem.word0();
+		utcb->mr[2] = mitem.word1();
+	}
+	int rc = l4_send(from, L4_time_t::Never);
+	if (rc)
+	{
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
 }
@@ -1603,7 +1844,7 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 
 		// create thread
-		newid = L4_thrid_t::create_global(newno, 7/* ver ??? */);
+		newid = L4_thrid_t::create_global(newno);
 		L4_fpage_t  rem_utcb = L4_fpage_t::create(mr[1]);
 		unsigned prio = mr[2];
 		L4_thrid_t space(mr[3]);
@@ -1618,12 +1859,12 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			prio = max_prio;
 		}
 
-		// find local addres for rem_utcb area
+		// find local address for rem_utcb area
 		L4_fpage_t loc_utcb;
-		rc = wrm_app_location(from, rem_utcb.addr(), rem_utcb.size(), Acc_rw, &loc_utcb);
+		rc = wrm_app_get_location(from, rem_utcb.addr(), rem_utcb.size(), Acc_rw, &loc_utcb);
 		if (rc)
 		{
-			wrm_loge("%s:  wrm_app_location(utcb=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
+			wrm_loge("%s:  wrm_app_get_location(utcb=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
 				__func__, rem_utcb.addr(), rem_utcb.size(), Acc_rw, rc);
 			ecode = 4;  // bad utcb
 			break;
@@ -1731,7 +1972,7 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 
 		// create task
-		newid = L4_thrid_t::create_global(newno, 7/* ver ??? */);
+		newid = L4_thrid_t::create_global(newno);
 		L4_fpage_t rem_utcbs = L4_fpage_t::create(mr[1]);
 		unsigned prio = mr[2];
 		L4_thrid_t inc_pager(mr[3]);
@@ -1746,11 +1987,11 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 		// find local address for rem_utcbs
 		L4_fpage_t loc_utcbs;
-		rc = wrm_app_location(from, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, &loc_utcbs);
+		rc = wrm_app_get_location(from, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, &loc_utcbs);
 		assert(rem_utcbs.size() == loc_utcbs.size());
 		if (rc)
 		{
-			wrm_loge("%s:  wrm_app_location(utcbs=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
+			wrm_loge("%s:  wrm_app_get_location(utcbs=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
 				__func__, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, rc);
 			ecode = 5;  // bad utcbs
 			break;
@@ -1853,7 +2094,7 @@ void process_register_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t fro
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(rep) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(rep) - rc=%u.\n", rc);
 		l4_kdb("Sending register-thread response is failed");
 	}
 }
@@ -1897,7 +2138,7 @@ void process_get_thread_id_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(rep) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(rep) - rc=%u.\n", rc);
 		l4_kdb("Sending get_thr-id response is failed.");
 	}
 }
@@ -1928,7 +2169,7 @@ void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	int rc = l4_send(from, L4_time_t::Never);
 	if (rc)
 	{
-		wrm_loge("l4_send(map) failed, rc=%u.\n", rc);
+		wrm_loge("l4_send(map) - rc=%u.\n", rc);
 		l4_kdb("Sending grant/map item is failed");
 	}
 }
@@ -1958,14 +2199,14 @@ int main()
 	while (app)
 	{
 		wrm_logi("create app=%s.\n", app->name);
-		L4_thrid_t id = L4_thrid_t::create_global(next_thread_id, 7/* ver ??? */);
+		L4_thrid_t id = L4_thrid_t::create_global(next_thread_no);
 		int rc = wrm_app_create(id, app);
 		if (rc)
 		{
-			wrm_loge("wrm_app_create() failed, rc=%d.\n", rc);
+			wrm_loge("wrm_app_create() - rc=%d.\n", rc);
 			l4_kdb("failed to create app");
 		}
-		next_thread_id += app->max_threads;
+		next_thread_no += app->max_threads;
 		app = Wrm_app_cfg_t::next(app);
 	}
 
@@ -1992,6 +2233,10 @@ int main()
 		if (tag.proto_label() == L4_msgtag_t::Pagefault)
 		{
 			process_pfault(tag, mr, from);
+		}
+		else if (tag.proto_label() == L4_msgtag_t::Io_pagefault)
+		{
+			process_io_pfault(tag, mr, from);
 		}
 		else if (tag.is_exc_request())
 		{

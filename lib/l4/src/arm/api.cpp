@@ -182,8 +182,8 @@ int l4_schedule(L4_thrid_t dest, word_t time_ctl, word_t proc_ctl, word_t prio,
 	return result==0 ? l4_utcb()->error() : 0;
 }
 
-int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
-             word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
+int l4_exchange_registers(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
+                          word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
 {
 	register word_t     r0 asm ("r0") = dest->raw();
 	register word_t     r1 asm ("r1") = ctrl;

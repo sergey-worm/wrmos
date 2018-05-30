@@ -7,9 +7,15 @@
 #include "uart.h"
 #include "elfloader.h"
 #include "ldr-config.h"
+  #include "krn-config.h"
+  #if Cfg_max_cpus > 1
+  #  define SMP
+  #endif
+  #include "intc.h"
 #include "list.h"
 #include "sys_utils.h"
 #include "sys_ramfs.h"
+#include "sys_proc.h"
 #include "l4_kip.h"
 #include "wlibc_cb.h"
 #include "wlibc_panic.h"
@@ -264,9 +270,76 @@ static void init_kip(addr_t sigma0_entry, addr_t roottask_entry)
 	}
 }
 
+// SMP
+
+enum
+{
+	Inter_cpu_start      = 1,  // init value     - not 0 to inter_cpu_flag be in .data, not .bss
+	Inter_cpu_io_ready   = 2,  // any CPU set    - slave CPUs may to use printf()
+	Inter_cpu_init_done  = 3   // master CPU set - slave CPUs may to jump at kernel_entry_point
+};
+
+volatile long cpu_ready[Cfg_max_cpus];
+volatile long inter_cpu_flag = Inter_cpu_start;  // not 0 to be in .data, not .bss
+volatile long kernel_entry_point = 0;            // kernel entry address
+
+static void set_inter_cpu_flag(long f)
+{
+	inter_cpu_flag = f;
+	Proc::wmb();
+	Proc::send_event();
+}
+
+static void wait_inter_cpu_flag(long f)
+{
+	while (inter_cpu_flag != f)
+	{
+		Proc::wait_event();
+		Proc::rmb();
+	}
+}
+
+static void slave_cpu(unsigned ncpu)
+{
+	unsigned cpuid = Proc::cpuid();
+	wait_inter_cpu_flag(Inter_cpu_io_ready);
+	printf("[ldr]  cpu #%u/%u ready, sp=0x%lx.\n", cpuid, ncpu, Proc::sp());
+
+	if (cpuid >= Cfg_max_cpus)
+		panic("cpu #%u exceeds platform parameter Cfg_max_cpus=%u.\n", cpuid, Cfg_max_cpus);
+
+	cpu_ready[cpuid] = 1;
+	Proc::wmb();
+	Proc::send_event();
+	wait_inter_cpu_flag(Inter_cpu_init_done);
+	typedef void(*func_t)(void);
+	((func_t)kernel_entry_point)();
+}
+
+static void wait_slave_cpus(unsigned ncpu)
+{
+	while (1)
+	{
+		Proc::wait_event();
+		Proc::rmb();
+		unsigned slave_cpus_ready = 0;
+		for (unsigned i=0; i<Cfg_max_cpus; ++i)
+			if (cpu_ready[i])
+				slave_cpus_ready++;
+		if (slave_cpus_ready == (ncpu - 1))
+			break;
+	}
+}
+
+// ~SMP
+
 // C entry point
 extern "C" int main()
 {
+	unsigned ncpu = intc_ncpu(Cfg_krn_intc_paddr);
+	if (Proc::cpuid())
+		slave_cpu(ncpu);
+
 	init_bss();
 	uart_init(Cfg_ldr_uart_paddr, Cfg_ldr_uart_bitrate, Cfg_sys_clock_hz);
 	init_io();
@@ -281,15 +354,25 @@ extern "C" int main()
 	printf("[ldr]          From Russia with love!\n");
 	printf("[ldr]\n");
 
+	printf("[ldr]  cpu #%u/%u ready, sp=0x%lx.\n", Proc::cpuid(), ncpu, Proc::sp());
+	if (ncpu > Cfg_max_cpus)
+		panic("cpu ncpu=%u exceeds project parameter Cfg_max_cpus=%u.\n", ncpu, Cfg_max_cpus);
+
+	// resume slave CPUs and wait for them
+	set_inter_cpu_flag(Inter_cpu_io_ready);
+	wait_slave_cpus(ncpu);
+
 	// print system info
-	printf("[ldr]  hello:  %s  %s.\n", __TIME__, __DATE__);
-	printf("[ldr]  hware:  %s, %s, %s, %s.\n", macro2str(Cfg_arch), macro2str(Cfg_cpu), macro2str(Cfg_plat), macro2str(Cfg_brd));
-	printf("[ldr]  ram:    [0x%08x - 0x%08x)  %6u MB.\n", Cfg_ram_start, Cfg_ram_start + Cfg_ram_sz, b2mb(Cfg_ram_sz));
+	printf("[ldr]\n");
+	printf("[ldr]  hello:   %s  %s.\n", __TIME__, __DATE__);
+	printf("[ldr]  gccver:  %u.%u.%u.\n", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+	printf("[ldr]  hware:   %s, %s, %s, %s.\n", macro2str(Cfg_arch), macro2str(Cfg_cpu), macro2str(Cfg_plat), macro2str(Cfg_brd));
+	printf("[ldr]  ram:     [0x%08x - 0x%08x)  %6u MB.\n", Cfg_ram_start, Cfg_ram_start + Cfg_ram_sz, b2mb(Cfg_ram_sz));
 
 	addr_t ramfs_addr;
 	size_t ramfs_sz;
 	get_ramfs(&ramfs_addr, &ramfs_sz);
-	printf("[ldr]  ramfs:  [0x%08lx - 0x%08lx)  %6u KB.\n", ramfs_addr, ramfs_addr + ramfs_sz, b2kb(ramfs_sz));
+	printf("[ldr]  ramfs:   [0x%08lx - 0x%08lx)  %6u KB.\n", ramfs_addr, ramfs_addr + ramfs_sz, b2kb(ramfs_sz));
 	sections.push_back(Section_t((addr_t)ramfs_addr, ramfs_sz, Mem_desc_t::Bldr_ramfs));
 
 	// search files - kernel, sigma0, roottask
@@ -368,7 +451,7 @@ extern "C" int main()
 	dprint("[ldr]  memory regions:\n");
 	for (Regions_t::citer_t it=regions.cbegin(); it!=regions.cend(); ++it)
 	{
-		dprint("[ldr]    [%lx - %lx)  sz=0x%08zx,  %s.\n", it->start, it->start + it->sz, it->sz, it->owner);
+		dprint("[ldr]    [%08lx - %08lx)  sz=0x%08zx,  %s.\n", it->start, it->start + it->sz, it->sz, it->owner);
 	}
 
 	for (Regions_t::citer_t it=regions.cbegin(); (it+1)!=regions.cend(); ++it)
@@ -402,6 +485,9 @@ extern "C" int main()
 	init_kip(sigma0_entry, roottask_entry);
 
 	printf("[ldr]  Go to kernel.\n\n");
+
+	kernel_entry_point = kernel_entry;
+	set_inter_cpu_flag(Inter_cpu_init_done);
 
 	typedef void(*func_t)(void);
 	((func_t)kernel_entry)();

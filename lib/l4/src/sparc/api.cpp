@@ -192,7 +192,6 @@ int l4_schedule(L4_thrid_t dest, word_t time_ctl, word_t proc_ctl, word_t prio,
 	return result==0 ? l4_utcb()->error() : 0;
 }
 
-#if 1 // NEW
 // incomming pointers not 0
 __attribute__((noinline)) static word_t do_exreg(word_t dest, word_t ctrl, word_t* sp, word_t* ip,
              word_t* flags, word_t* pager, word_t* udhnd)
@@ -218,8 +217,8 @@ __attribute__((noinline)) static word_t do_exreg(word_t dest, word_t ctrl, word_
 	return result;
 }
 
-int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
-             word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
+int l4_exchange_registers(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
+                          word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
 {
 	register word_t _flags  = flags ? *flags: 0;
 	register word_t _sp     = sp ? *sp : 0;
@@ -243,41 +242,6 @@ int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
 		*usr_def_handle = _udhnd;
 	return result.is_nil() ? l4_utcb()->error() : 0;
 }
-#else // OLD
-int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
-             word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle, word_t* frcexc)
-{
-	register word_t     g4 asm ("%g4") = flags ? *flags: 0;
-	register word_t     o0 asm ("%o0") = dest->raw();
-	register word_t     o1 asm ("%o1") = ctrl;
-	register word_t     o2 asm ("%o2") = sp ? *sp : 0;
-	register word_t     o3 asm ("%o3") = ip ? *ip : 0;
-	register word_t     o4 asm ("%o4") = pager ? pager->raw() : 0;
-	register word_t     o5 asm ("%o5") = usr_def_handle ? *usr_def_handle : 0;
-	register word_t     g7 asm ("%g7") = ip ? *(ip+1) : 0; // must be after o-regs
-	register word_t     g5 asm ("%g5") = frcexc ? *frcexc : 0; // must be after o-regs
-	register word_t     g1 asm ("%g1") = L4_syscall_exchange_registers; // must be after o-regs
-	(void)g1; (void)g4; (void)o0; (void)o1; (void)o2; (void)o3; (void)o4; (void)o5;
-	do_syscall();
-	L4_thrid_t result(o0);
-	*dest = result;
-	if (sp)
-		*sp = o2;
-	if (ip)
-		*ip = o3;
-	if (ip)
-		*(ip+1) = g7;
-	if (flags)
-		*flags = g4;
-	if (pager)
-		*pager = o4;
-	if (usr_def_handle)
-		*usr_def_handle = o5;
-	if (frcexc)
-		*frcexc = g5;
-	return result.is_nil() ? l4_utcb()->error() : 0;
-}
-#endif
 
 // run KDB
 int l4_kdb(word_t opcode, word_t param, void* data, size_t sz)

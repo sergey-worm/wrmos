@@ -9,6 +9,7 @@
 #include "wrm_log.h"
 #include "wrm_labels.h"
 #include "l4_api.h"
+#include "l4_thrid.h"
 #include <assert.h>
 #include <string.h>
 
@@ -27,7 +28,7 @@ int wrm_app_threads(L4_thrid_t app_id, unsigned* thrno_begin, unsigned* thrno_en
 
 	L4_thrid_t from = L4_thrid_t::Nil;
 	L4_time_t never(L4_time_t::Never);
-	const L4_thrid_t alpha = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1); //TODO: make api for get alpha ID
+	const L4_thrid_t alpha = l4_thrid_roottask();
 	int rc = l4_ipc(alpha, alpha, L4_timeouts_t(never, never), &from);
 	if (rc)
 	{

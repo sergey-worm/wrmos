@@ -19,5 +19,5 @@ int wrm_ramfs_get_file(const char* filename, addr_t* addr, size_t* size);
 }
 #endif
 
-#endif // WRM_MPOOL_H
+#endif // WRM_RAMFS_H
 

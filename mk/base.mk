@@ -209,7 +209,7 @@ $(blddir)/lib%.a:  $(objects)
 
 -include $(objects:.o=.d)
 
-$(blddir)/%.o:  %.cpp
+$(blddir)/%.o:  %.cpp $(cpp_deps)
 	@mkdir -p $(dir $@)
 	@$(echo) "$(color_compile)[C++] $(notdir $(target)):  $(notdir $<) --> $(notdir $@)$(color_off)"
 	$(v)$(gccprefix)g++ $(cxxflags) -c $< -o $@

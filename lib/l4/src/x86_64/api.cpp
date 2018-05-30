@@ -96,13 +96,14 @@ int l4_send(L4_thrid_t to, L4_time_t timeout)
 	L4_timeouts_t timeouts(timeout, L4_time_t::Never);
 	return l4_ipc(to, L4_thrid_t::Nil, timeouts);
 }
-
+/*
 // receive phase only
 int l4_receive(L4_thrid_t from_spec, L4_time_t timeout, L4_thrid_t& from) // obsolete
 {
 	L4_timeouts_t timeouts(L4_time_t::Never, timeout);
 	return l4_ipc(L4_thrid_t::Nil, from_spec, timeouts, from);
 }
+*/
 int l4_receive(L4_thrid_t from_spec, L4_time_t timeout, L4_thrid_t* from)
 {
 	L4_timeouts_t timeouts(L4_time_t::Never, timeout);
@@ -171,12 +172,6 @@ L4_clock_t l4_system_clock()
 // do ThreadSwitch syscall
 void l4_thread_switch(L4_thrid_t dest)
 {
-/*
-	register L4_thrid_t r0 asm ("r0") = dest;
-	register word_t     r7 asm ("r7") = L4_syscall_thread_switch;
-	(void)r0; (void)r7;
-	do_syscall();
-*/
 	l4_kdb("IMPME:  l4_thread_switch()", 1);
 }
 
@@ -204,7 +199,7 @@ int l4_schedule(L4_thrid_t dest, word_t time_ctl, word_t proc_ctl, word_t prio,
 word_t __attribute__((noinline)) _l4_exreg(word_t dest, word_t ctrl, word_t sp, word_t ip,
              word_t flags, word_t pager, word_t usr_def_handle)
 {
-// FIXME:  it works incorrect now
+	// FIXME:  it works incorrect now
 	register word_t     rax asm ("rax") = dest;
 	register word_t     rcx asm ("rcx") = ctrl;
 	register word_t     rdx asm ("rdx") = sp;
@@ -219,8 +214,8 @@ word_t __attribute__((noinline)) _l4_exreg(word_t dest, word_t ctrl, word_t sp, 
 	return rax;
 }
 
-int l4_exreg(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
-             word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
+int l4_exchange_registers(L4_thrid_t* dest, word_t ctrl, word_t* sp, word_t* ip,
+                          word_t* flags, L4_thrid_t* pager, word_t* usr_def_handle)
 {
 #if 1
 	word_t res = _l4_exreg(

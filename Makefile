@@ -57,7 +57,8 @@ $(blddir)/ldr/$(ldr_file):  $(ramfs_deps)
 		ldr_ramfs="$(ldr_ramfs)" \
 		ramfs_files="$(ramfs_files)" \
 		dbg=$(ldr_dbg) \
-		uart=$(ldr_uart)
+		uart=$(ldr_uart) \
+		intc=$(ldr_intc)
 
 clean_elfs = $(ramfs_elfs) $(blddir)/ldr/$(ldr_file)
 clean_deps = $(addsuffix .CLEANLIBS,$(clean_elfs)) $(addsuffix .CLEAN,$(clean_elfs))

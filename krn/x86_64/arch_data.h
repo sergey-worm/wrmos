@@ -1,12 +1,7 @@
 //##################################################################################################
 //
-//  Low-level driver for ARM generic timer.
+//  Arch_data - arch specifics kernel data.
 //
 //##################################################################################################
 
-#ifndef TIMER_H
-#define TIMER_H
-
-#error  TODO
-
-#endif // TIMER_H
+#include "../x86/arch_data.h"

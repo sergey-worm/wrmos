@@ -42,8 +42,9 @@ enum
 	ICW4_BUF_MASTER = 0x0C,       // Buffered mode/master
 	ICW4_SFNM       = 0x10,       // Special fully nested (not)
 
-	PIC_READ_IRR    = 0x0a,       // OCW3 irq ready next CMD read
-	PIC_READ_ISR    = 0x0b,       // OCW3 irq service next CMD read
+	PIC_READ_IRR    = 0x8 | 0x2,  // next CMD read return IRR value
+	PIC_READ_ISR    = 0x8 | 0x3,  // next CMD read return ISR value
+	PIC_POLL_IRQ    = 0x8 | 0x4,  // next CMD read return max-prio pending IRQ, IRR->ISR
 };
 
 inline uint16_t _intc_get_mask()
@@ -73,7 +74,19 @@ inline uint16_t _intc_get_isr()
 	return _intc_get_reg(PIC_READ_ISR);
 }
 
-typedef void (*Intc_print_t)(const char* format, ...);
+// return current max-prio not masked IRQ, clear IRR, set ISR
+inline uint16_t _intc_poll_irq()
+{
+	return _intc_get_reg(PIC_POLL_IRQ);
+}
+
+inline unsigned intc_ncpu(unsigned long base_addr)
+{
+	(void) base_addr;
+	return 1;  // FIXME:  IMPLME
+}
+
+typedef void (*Intc_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 inline void intc_init(uintptr_t base_addr, Intc_print_t dprint)
 {
@@ -129,27 +142,57 @@ inline int intc_mask(uintptr_t base_addr, unsigned irq)
 	return 0;
 }
 
+// clear IRR and ISR
 inline int intc_clear(uintptr_t base_addr, unsigned irq)
 {
 	(void) base_addr;
 	if (irq > 0xf)
 		return 1;
 
-	// end od interrrupt
+	// clear IRR
+	if (_intc_get_irr() & (1 << irq))
+	{
+		// mask all but 'irq'
+		uint8_t mask1 = Proc::inb(PIC1_DATA);
+		uint8_t mask2 = Proc::inb(PIC2_DATA);
+		uint8_t mask1_new = (irq < 8) ? ~(1 << irq) : 0xff;
+		uint8_t mask2_new = (irq < 8) ? 0xff : ~(1 << irq);
+		Proc::outb(PIC1_DATA, mask1_new);
+		Proc::outb(PIC2_DATA, mask2_new);
+
+		 // poll current not masked IRQ --> if IRQ exist: IRR clear, ISR set
+		_intc_poll_irq();
+
+		// restore mask
+		Proc::outb(PIC1_DATA, mask1);
+		Proc::outb(PIC2_DATA, mask2);
+	}
+
+	// clear ISR - do end of interrupt, allow to process IRQ with prio <= current
 	if (irq >= 8)
 		Proc::outb(PIC2_CMD, PIC_EOI);
 	Proc::outb(PIC1_CMD, PIC_EOI);
+
+	return 0;
+}
+
+inline int intc_eoi(unsigned base_addr, unsigned irq)
+{
+	(void) base_addr;
+	if (irq > 0xf)
+		return 1;  // wrong irq
+
+	// nothing, EOI do in intc_clear()
 	return 0;
 }
 
 inline bool intc_is_pending(uintptr_t base_addr, unsigned irq)
 {
-	//printf(" -- isr=0x%x, irr=0x%x.\n", _intc_get_isr(), _intc_get_irr());
 	if (irq > 0xf)
-		return 0;  // wront irq
+		return 0;  // wrong irq
 
 	(void) base_addr;
-	return _intc_get_isr() & (1 << irq)  ||  _intc_get_irr() & (1 << irq); // in-service or raised
+	return /*_intc_get_isr() & (1 << irq)  ||*/  _intc_get_irr() & (1 << irq); // in-service or raised
 }
 
 inline unsigned intc_real_irq(uintptr_t base_addr, unsigned irq)

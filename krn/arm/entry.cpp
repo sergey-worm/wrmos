@@ -11,6 +11,8 @@
 extern "C" void arm_entry_undef(addr_t spsr, addr_t inst)
 {
 	force_printk("undef_trap:  spsr=0x%lx, inst=0x%lx.\n", spsr, inst);
+	force_printk("undef_trap:  inst_opcode:  0x%lx.\n", *(word_t*)inst);
+	force_printk("undef_trap:  spsr:         %s.\n", Proc::Psr_t(spsr).str());
 	panic("TODO");
 }
 
@@ -56,7 +58,7 @@ extern "C" void arm_entry_dabort(addr_t spsr, addr_t inst)
 	force_printk("dabort_trap:  spsr=0x%lx, inst=0x%lx, fault_addr=0x%lx, fault_status=0x%lx.\n",
 		spsr, inst, data_fault_addr, data_fault_status);
 
-	bool krn_mode = (spsr & 0x1f) != 0x10; //Proc::psr() & (1<<6); // psr.ps
+	bool krn_mode = (spsr & 0x1f) != 0x10;
 
 	//printk("pfault:  addr=0x%x, status=0x%x, inst=0x%x.\n", fault_addr, fault_status, fault_inst);
 
@@ -82,11 +84,11 @@ extern "C" void arm_entry_reset(addr_t spsr, addr_t inst)
 
 extern "C" void arm_entry_irq(addr_t spsr, addr_t inst)
 {
-	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__));
+	unsigned irq = Intc::irq();
+	Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock(__func__, irq==Cfg_krn_timer_irq));
 
 	(void)spsr;
 	(void)inst;
-	unsigned irq = Intc::irq();
 	kentry_irq(irq);
 
 	Sched_t::current()->tmevent_kexit_start(SystemClock_t::sys_clock(__func__));

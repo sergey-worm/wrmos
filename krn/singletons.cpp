@@ -6,13 +6,13 @@
 
 #include "ktimer.h"
 
-uintptr_t Timer::_addr = -1;
-unsigned  Timer::_sysclock_hz = 0;
-unsigned  Timer::_period_usec = 0;
+addr_t   Timer::_addr = -1;
+unsigned Timer::_sysclock_hz = 0;
+unsigned Timer::_period_usec = 0;
 
 #include "kintc.h"
 
-uintptr_t Intc::_addr = -1;
+addr_t Intc::_addr = -1;
 
 #include "kuart.h"
 
@@ -20,9 +20,10 @@ addr_t Uart::_addr = -1;
 
 #include "sysclock.h"
 
-L4_clock_t SystemClock_t::_sys_clock = 0;
-L4_kip_t*  SystemClock_t::_kip = 0;
+L4_clock_t SystemClock_t::_sys_clock  = 0;
+L4_kip_t*  SystemClock_t::_kip        = 0;
 int        SystemClock_t::_inside_kdb = 0;
+int        SystemClock_t::_not_check  = 0;
 
 #include "kmem.h"
 

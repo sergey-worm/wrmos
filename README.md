@@ -20,7 +20,8 @@ Build and run:
 
 	qemu-sparc-leon3:
 		make build P=cfg/prj/hello-qemu-leon3.prj B=../build -j
-		qemu-system-sparc -M leon3_generic -display none -serial stdio -kernel ../build/ldr/bootloader.elf
+		qemu-system-sparc -M leon3_generic -display none -serial stdio \
+			-kernel ../build/ldr/bootloader.elf
 
 	tsim-leon3:
 		make build P=cfg/prj/hello-tsim-leon3.prj B=../build -j
@@ -28,15 +29,18 @@ Build and run:
 
 	qemu-arm-vexpress-a9:
 		make build P=cfg/prj/hello-qemu-veca9.prj B=../build -j
-		qemu-system-arm -M vexpress-a9 -display none -serial stdio -kernel ../build/ldr/bootloader.elf
+		qemu-system-arm -M vexpress-a9 -display none -serial stdio \
+			-kernel ../build/ldr/bootloader.elf
 
 	qemu-x86:
 		make build P=cfg/prj/hello-qemu-x86.prj B=../build -j
-		qemu-system-i386 -display none -serial stdio -drive format=raw,file=$(realpath ../build/ldr/bootloader.img)
+		qemu-system-i386 -display none -serial stdio \
+			-drive format=raw,file=$(realpath ../build/ldr/bootloader.img)
 
 	qemu-x86_64:
 		make build P=cfg/prj/hello-qemu-x86_64.prj B=../build -j
-		qemu-system-x86_64 -display none -serial stdio -drive format=raw,file=$(realpath ../build/ldr/bootloader.img)
+		qemu-system-x86_64 -display none -serial stdio \
+			-drive format=raw,file=$(realpath ../build/ldr/bootloader.img)
 
 	Raspberry PI:
 		make build P=cfg/prj/hello-rpi.prj B=../build -j
@@ -59,9 +63,10 @@ WrmOS have own implementation of next components:
 
 ## Plans
 
-1. Run WrmOS on real hardware for ARM, x86 and x86_64;
+1. Run WrmOS on real hardware for x86 and x86_64;
 1. Support SMP;
-1. Support ROS API (ros.org).
+1. Support ROS API (ros.org);
+1. Support OROCOS API (orocos.org).
 
 ## Contacts
 

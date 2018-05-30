@@ -30,7 +30,7 @@ libs       += $(rtblddir)/lib/console/libconsole.a
 
 ifeq ($(dbg),1)
   baseflags += -DDEBUG
-#else
+else
   baseflags += -DNDEBUG
 endif
 

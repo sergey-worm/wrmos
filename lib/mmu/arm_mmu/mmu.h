@@ -6,7 +6,7 @@
 //
 //    Level  Name     TableSize  PageSize  HasMap   HasDir
 //        1  section    0x1000       1 MB       +        +
-//        2  page        0x100       2 kB       +        -
+//        2  page        0x100       4 kB       +        -
 //
 //##################################################################################################
 
@@ -27,33 +27,37 @@
 enum
 {
 	// table size in records
-	L1_sz     = 0x1000,
-	L2_sz     = 0x100,
+	L1_sz               = 0x1000,
+	L2_sz               = 0x100,
 
 	// table size in bytes
-	L1_bytes  = L1_sz * sizeof(word_t),
-	L2_bytes  = L2_sz * sizeof(word_t),
+	L1_bytes            = L1_sz * sizeof(word_t),
+	L2_bytes            = L2_sz * sizeof(word_t),
 
-	L1_pgsz   = 0x100000,  // 1 MB
-	L2_pgsz   = 0x1000,    // 4 kB
+	L1_pgsz             = 0x100000,  // 1 MB
+	L2_pgsz             = 0x1000,    // 4 kB
 
-	NotCachable   = 0,
-	Cachable      = 1,
+	NotCachable         = 0,
+	Cachable            = 1,
 
-	Mmu_acc_kno_uno   = 0,
-	Mmu_acc_krwx_uno  = 1,
-	Mmu_acc_krwx_urx  = 2,
-	Mmu_acc_krwx_urwx = 3,
-	Mmu_acc_mask      = 3,
-	Mmu_acc_max       = 3,
+	Mmu_acc_kno_uno     = 0,
+	Mmu_acc_krwx_uno    = 1,
+	Mmu_acc_krwx_urx    = 2,
+	Mmu_acc_krwx_urwx   = 3,
+	Mmu_acc_mask        = 3,
+	Mmu_acc_max         = 3,
 
-	Et_l1_inv = 0,
-	Et_l1_dir = 1,
-	Et_l1_map = 2,
-	Et_l2_inv = 0,
-	Et_l2_map = 2,
-	Et_mask   = 0x3,
+	Et_l1_inv           = 0,    //
+	Et_l1_dir           = 1,    // ptable
+	Et_l1_map           = 2,    // section
+	Et_l2_inv           = 0,    //
+	Et_l2_map           = 2,    // section
+	Et_mask             = 0x3,  //
 
+	Mmu_reg_ctrl_icache = 1 << 12,
+	Mmu_reg_ctrl_wrbuf  = 1 <<  3,
+	Mmu_reg_ctrl_dcache = 1 <<  2,
+	Mmu_reg_ctrl_mmu    = 1 <<  0
 };
 
 struct L1_map_t
@@ -144,7 +148,7 @@ struct L2_map_t
 
 inline void mmu_tlb_flush()
 {
-	asm volatile("mcr p15, 0, r0, c8, c7, 0"); // TLBIALL▫
+	asm volatile("mcr p15, 0, r0, c8, c7, 0"); // TLBIALL
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -159,8 +163,8 @@ inline void mmu_set_dir(unsigned level, word_t* cell, paddr_t tb)
 		L1_dir_t dir;
 		dir.raw    = 0;
 		dir.addr   = tb >> 10;
-		dir.domain = 0;  // FIXME
-		dir.type   = 1;  // ptable
+		dir.domain = 0;
+		dir.type   = Et_l1_dir;
 		*cell = dir.raw;
 	}
 }
@@ -172,10 +176,10 @@ inline void _mmu_set_l1_map(word_t* cell, paddr_t pa, unsigned access, unsigned 
 	map.raw    = 0;
 	map.addr   = pa >> 20;
 	map.acc    = access;
-	map.domain = 0; // FIXME
+	map.domain = 0;
 	map.c      = cachable;
 	map.b      = cachable;
-	map.type   = 2;  // section
+	map.type   = Et_l1_map;
 	*cell = map.raw;
 	(void) access;
 	(void) cachable;
@@ -190,7 +194,7 @@ inline void _mmu_set_l2_map(word_t* cell, paddr_t pa, unsigned access, unsigned 
 	map.acc0   = access;
 	map.c      = cachable;
 	map.b      = cachable;
-	map.type   = 2;  // section
+	map.type   = Et_l2_map;
 	*cell = map.raw;
 	(void) access;
 	(void) cachable;
@@ -352,6 +356,8 @@ inline word_t mmu_reg_ctrl()
 inline void mmu_reg_ctrl(word_t val)
 {
 	asm volatile ("mcr p15, 0, %0, c1, c0, 0" :: "r"(val));
+	asm volatile ("dsb");  // allow the MMU to start up
+	asm volatile ("isb");  // flush prefetch buffer
 }
 
 inline word_t mmu_reg_ttbr()
@@ -364,6 +370,7 @@ inline word_t mmu_reg_ttbr()
 inline void mmu_reg_ttbr(word_t val)
 {
 	mmu_assert(mmu_isalign(val, 0x4000)); // 16 kB for L1 table
+	//val |= 0x5b; // outer-cacheable, WB
 	asm volatile ("mcr p15, 0, %0, c2, c0, 0" :: "r"(val));
 }
 

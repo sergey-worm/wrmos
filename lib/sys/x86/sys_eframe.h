@@ -102,6 +102,7 @@ public:
 	}
 
 	inline bool is_krn_entry() { return syscall_frame.is_krn_entry(); }
+	inline uint16_t dx()         { return syscall_frame.edx & 0xffff; }
 	inline word_t error()      { return syscall_frame.err; }
 
 	inline unsigned scall_number() { return *(word_t*)(syscall_frame.esp); } // on user stack

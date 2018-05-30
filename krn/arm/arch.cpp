@@ -19,13 +19,13 @@ void arch_set_timer_va(long va)
 	timer_va = va;
 }
 
-void arch_set_ksp(uintptr_t ksp)
+void arch_set_ksp(long ksp)
 {
 	extern unsigned cur_ksp;
 	cur_ksp = ksp;
 }
 
-uintptr_t arch_get_ksp()
+long arch_get_ksp()
 {
 	extern unsigned cur_ksp;
 	return cur_ksp;
@@ -69,6 +69,8 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 	);
 }
 
+#include "printk.h"
+
 void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 {
 	// set utcb
@@ -77,10 +79,11 @@ void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 	// store user and kernel contexts and return address on kstack
 	asm volatile
 	(
-		"stmdb sp!, {sp, lr}^          \n" // store user registers
-		"stmdb sp!, {r0-r12, sp, lr}   \n" // store kernel registers
-		"adr   lr, 1f                  \n" // prepare return address
-		"push  {lr}                    \n" // store return address
+		"stmdb sp, {sp, lr}^           \n"  // store user registers, without writeback sp
+		"sub sp, #8                    \n"  // correcet sp
+		"stmdb sp!, {r0-r12, lr}       \n"  // store kernel registers, without sp
+		"adr   lr, 1f                  \n"  // prepare return address
+		"push  {lr}                    \n"  // store return address
 	);
 
 	// XXX:   Is nees store/restore all registers r0-r15 ?!
@@ -104,8 +107,9 @@ void arch_switch_cpu(addr_t* cur_ksp, addr_t nxt_ksp, word_t nxt_utcb)
 	// restore user and kernel contexts
 	asm volatile
 	(
-		"ldmia sp!, {r0-r12, sp, lr}    \n"  // restore kernel registers
-		"ldmia sp!, {sp, lr}^           \n"  // restore user registars
+		"ldmia sp!, {r0-r12, lr}      \n"  // restore kernel registers, without sp
+		"ldmia sp, {sp, lr}^          \n"  // restore user registers, without writeback sp
+		"add sp, #8                   \n"  // correct sp
 	);
 }
 

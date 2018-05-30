@@ -196,6 +196,11 @@ public:
 		return _cli_apps.size();
 	}
 
+	int empty()
+	{
+		return _cli_apps.empty();
+	}
+
 	Cli_app_t* input_cli_app() const { return _input_app; }
 	void input_cli_app(Cli_app_t* v) { _input_app = v;    }
 };
@@ -594,14 +599,21 @@ static int process_input_chars(char* buf, unsigned sz)
 	{
 		// discard all input data and switch input app
 		rx_cbuf.clear();
-		Cli_apps_t::iter_t it = cli_apps.begin();
-		for ( ; it!=cli_apps.end() && cli_apps.input_cli_app()!=&*it; ++it);  // find cur input
-		if (it == cli_apps.end()  ||  (it+1) == cli_apps.end())
-			it = cli_apps.begin();
+		if (cli_apps.empty())
+		{
+			printf("[cons]  no app for input.\n");
+		}
 		else
-			++it;
-		cli_apps.input_cli_app(&*it);
-		printf("[cons]  new input app is %u/%s.\n", it->owner().number(), it->name());
+		{
+			Cli_apps_t::iter_t it = cli_apps.begin();
+			for ( ; it!=cli_apps.end() && cli_apps.input_cli_app()!=&*it; ++it);  // find cur input
+			if (it == cli_apps.end()  ||  (it+1) == cli_apps.end())
+				it = cli_apps.begin();
+			else
+				++it;
+			cli_apps.input_cli_app(&*it);
+			printf("[cons]  new input app is %u/%s.\n", it->owner().number(), it->name());
+		}
 	}
 	else
 	{
@@ -975,17 +987,12 @@ int main(int argc, const char* argv[])
 	static char rx_buf[0x1000];
 	rx_cbuf.init(rx_buf, sizeof(rx_buf));
 
-	// FIXME:  get app memory from Alpha
-	static char memory [4*Cfg_page_sz] __attribute__((aligned(4*Cfg_page_sz)));
-	wrm_mpool_add(L4_fpage_t::create((addr_t)memory, sizeof(memory), Acc_rw));
-	// ~FIXME
-
 	// create driver thread
 	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
 	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp.addr(), driver_rx_thread, 0, stack_fp.addr(), stack_fp.size(),
+	rc = wrm_thread_create(utcb_fp, driver_rx_thread, 0, stack_fp.addr(), stack_fp.size(),
 	                      255, "c-dr", Wrm_thr_flag_no, &app.loc_drv);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, app.loc_drv.number());
 	assert(!rc && "failed to create driver thread");
@@ -995,7 +1002,7 @@ int main(int argc, const char* argv[])
 	utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp.addr(), client_thread, 0, stack_fp.addr(), stack_fp.size(),
+	rc = wrm_thread_create(utcb_fp, client_thread, 0, stack_fp.addr(), stack_fp.size(),
 	                      255, "c-cl", Wrm_thr_flag_no, &app.loc_cli);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, app.loc_cli.number());
 	assert(!rc && "failed to create Client thread");

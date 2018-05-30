@@ -66,6 +66,7 @@ objs        += syscalls.o
 objs        += ipc.o
 objs        += startup.o
 objs        += common.o
+objs        += kdb.o
 incflags    := -I.
 incflags    += -I$(cfgdir)
 incflags    += -I$(arch)

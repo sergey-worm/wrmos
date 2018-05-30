@@ -25,9 +25,10 @@ class L4_thrid_t
 public:
 	enum
 	{
-		Nil       = 0,
-		Any       = (word_t)-1l,
-		Any_local = (word_t)(-1l & ~0x3fl)  // low 6 bits are nulls
+		Nil          = 0,
+		Any          = (word_t)-1l,
+		Any_local    = (word_t)(-1l & ~0x3fl),  // low 6 bits are nulls
+		Def_glob_ver = 2, // default version for global thrid, !=0 and !=1
 	};
 
 	union
@@ -74,13 +75,13 @@ public:
 	inline bool is_global()    const { return is_single()  &&  _local.nulls != 0x0; }
 	//inline bool is_irq()     const { return _global.version == 0x1; }
 
-	inline word_t   raw()        const { return _raw; }
-	inline unsigned number()     const { return is_global() ? _global.number : _local.number; }
-	inline word_t   version()    const { return _global.version; }
+	inline word_t   raw()      const { return _raw; }
+	inline unsigned number()   const { return is_global() ? _global.number : _local.number; }
+	inline word_t   version()  const { return _global.version; }
 
 	inline void set(word_t v)        { _raw = v; }
 
-	static inline L4_thrid_t create_global(word_t num, word_t ver)
+	static inline L4_thrid_t create_global(word_t num, word_t ver = Def_glob_ver)
 	{
 		L4_thrid_t thrid;
 		thrid._global.number = num;
@@ -88,7 +89,6 @@ public:
 		return thrid;
 	}
 
-	/*
 	static inline L4_thrid_t create_irq(word_t num)
 	{
 		L4_thrid_t thrid;
@@ -96,7 +96,6 @@ public:
 		thrid._global.version = 0x1;
 		return thrid;
 	}
-	*/
 	/*
 	static inline L4_thrid_t create_local(word_t num)
 	{
@@ -285,7 +284,8 @@ public:
 	enum
 	{
 		Nil      = 0x0,
-		Complete = 1 << 4
+		Complete = 1 << 4,
+		Ioport   = 0x26
 	};
 	enum
 	{
@@ -298,13 +298,13 @@ public:
 		Size_min = Cfg_page_sz
 	};
 
-	enum { Base_width = sizeof(word_t) * 8 - 10 }; // 22/54 for 32/64-bit system
 
 	union
 	{
 		word_t _raw;
 		struct
 		{
+			enum { Base_width = sizeof(word_t) * 8 - 10 }; // 22/54 for 32/64-bit system
 			#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 			long     base  : Base_width; // base addr >> 10
 			unsigned size  : 6;          // size, bytes = 1 << size
@@ -316,33 +316,57 @@ public:
 			unsigned size  : 6;          // size, bytes = 1 << size
 			long     base  : Base_width; // base addr >> 10
 			#endif
-		} _val;
+		} _mem;
+		struct
+		{
+			enum { Base_width = sizeof(word_t) * 8 - 16 }; // 16/48 for 32/64-bit system
+			#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+			long     base  :  Base_width; // base port
+			unsigned size  :  6;          // size, bytes = 1 << size
+			unsigned magic : 10;          // should be 0x26
+			#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			unsigned magic : 10;          // should be 0x26
+			unsigned size  : 6;           // size, bytes = 1 << size
+			long     base  : Base_width;  // base port
+			#endif
+		} _iop;
 	};
 
+	inline bool     is_io()       const { return _iop.magic == Ioport; }
 	inline bool     is_nil()      const { return _raw == Nil; }
-	inline bool     is_complete() const { return !_val.base  &&  _val.size == 1; }
-	inline addr_t   addr()        const { return (addr_t)_val.base << 10; }
-	inline long     base()        const { return _val.base; }
-	inline word_t   size()        const { return 1ul << _val.size;  }
-	inline unsigned log2sz()      const { return _val.size;       }
-	inline unsigned access()      const { return _val.rwx;        }
+	inline bool     is_complete() const { return !_mem.base  &&  _mem.size == 1; }
+	inline addr_t   addr()        const { return (addr_t)_mem.base << 10; }
+	inline long     base()        const { return _mem.base; }
+	inline word_t   size()        const { return 1ul << _mem.size;  }
+	inline unsigned log2sz()      const { return _mem.size;       }
+	inline unsigned access()      const { return _mem.rwx;        }
 	inline word_t   end()         const { return addr() + size(); }
 	inline word_t   raw()         const { return _raw;            }
 
-	inline void     base(long v)        { _val.base = v;        }
-	inline void     addr(addr_t v)      { _val.base = v >> 10;  }
-	inline void     log2sz(unsigned v)  { _val.size = v;        }
-	inline void     access(unsigned v)  { _val.rwx  = v;        }
+	inline word_t   io_port()     const { return _iop.base; }
+	inline word_t   io_size()     const { return 1ul << _iop.size;  }
+
+	inline void     base(long v)        { _mem.base = v;        }
+	inline void     addr(addr_t v)      { _mem.base = v >> 10;  }
+	inline void     log2sz(unsigned v)  { _mem.size = v;        }
+	inline void     access(unsigned v)  { _mem.rwx  = v;        }
 
 	void operator = (word_t v)      { _raw = v; }
 
 	inline void set_nil()       { _raw = Nil;      }
-	inline void set_complete()  { _val.base = 0;  _val.size = 1; }
+	inline void set_complete()  { _mem.base = 0;  _mem.size = 1; }
 
 	static inline L4_fpage_t create(word_t adr, word_t sz_bytes, unsigned acc)
 	{
 		L4_fpage_t fpage;
 		fpage.set(adr, sz_bytes, acc);
+		return fpage;
+	}
+
+	static inline L4_fpage_t create_io(word_t port, word_t sz_ports)
+	{
+		L4_fpage_t fpage;
+		fpage.set_io(port, sz_ports);
 		return fpage;
 	}
 
@@ -376,19 +400,47 @@ public:
 		}
 		else
 		{
-			_val.base = adr >> 10;
-			_val.size = 0;
-			_val.rwx = acc & Acc_rwx;
+			_mem.base = adr >> 10;
+			_mem.size = 0;
+			_mem.rwx = acc & Acc_rwx;
 
 			// find single bit in sz_bytes
 			word_t bytes = sz_bytes;
 			while (!(bytes & 0x1))
 			{
 				bytes >>= 1;
-				_val.size += 1;
+				_mem.size += 1;
 			}
 
+			// check
 			if (size() != sz_bytes)
+				_raw = Nil;
+		}
+	}
+
+	// sz_ports = 1, 2, 4, 8, 16, 32, ...
+	inline void set_io(word_t port, word_t sz_ports)
+	{
+		if (!sz_ports  ||  port > 0xffff  ||  (port+sz_ports) > 0xffff  ||  !is_aligned(port, sz_ports))
+		{
+			_raw = Nil;
+		}
+		else
+		{
+			_iop.base = port;
+			_iop.size = 0;
+			_iop.magic = Ioport;
+
+			// find single bit in sz_ports
+			word_t ports = sz_ports;
+			while (!(ports & 0x1))
+			{
+				ports >>= 1;
+				_iop.size += 1;
+			}
+
+			// check
+			if (io_size() != sz_ports)
 				_raw = Nil;
 		}
 	}
@@ -511,6 +563,11 @@ public:
 		_val.s.cont = cont;
 	}
 
+	inline void set_grant()
+	{
+		_val.s.type = L4_typed_item_t::Grant_item;
+	}
+
 	static inline L4_map_item_t create(L4_fpage_t fpage, bool cont = false)
 	{
 		L4_map_item_t item;
@@ -545,14 +602,6 @@ public:
 		L4_map_item_t::set(fpg);
 		_val.s.type = L4_typed_item_t::Grant_item;
 	}
-	/*
-	static inline L4_map_item_t create(L4_fpage_t fpage)
-	{
-		L4_grant_item_t item = (L4_grant_item_t) L4_map_item_t::create(fpage);
-		item._val.type = L4_typed_item_t::Grant_item;
-		return item;
-	}
-	*/
 };
 
 static_assert(sizeof(L4_grant_item_t) == 2 * sizeof(word_t));
@@ -663,8 +712,13 @@ public:
 		struct
 		{
 			enum { Reserve_width = sizeof(word_t) * 8 - 1 };  // 31/63 for 32/64-bit systems
+			#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 			word_t   reserve : Reserve_width;
 			unsigned string  :  1;  // stringItems are accepted iff string == 1
+			#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			unsigned string  :  1;  // stringItems are accepted iff string == 1
+			word_t   reserve : Reserve_width;
+			#endif
 		} _flags;
 	};
 
@@ -674,9 +728,9 @@ public:
 	inline word_t raw()              const  { return _raw;           }
 	inline L4_fpage_t fpage()        const  { return _fpage;         }
 	inline bool string_accepted()    const  { return _flags.string;  }
-	inline void fpage(L4_fpage_t v)         { _fpage = v.raw() & ~7; }
+	inline void fpage(L4_fpage_t v)         { _raw = v.raw() & ~7;   }
 	inline void string_accepted(bool str)   { _flags.string = str;   }
-	inline void set(L4_fpage_t v, bool str) { _fpage = v.raw() & ~7;  _flags.string = str; }
+	inline void set(L4_fpage_t v, bool str) { _raw = v.raw() & ~7;  _flags.string = str; }
 
 	static inline L4_acceptor_t create(L4_fpage_t fp, bool str = false)
 	{
@@ -697,10 +751,11 @@ public:
 	// labels
 	enum
 	{
-		// TODO:  think
+		// Protocols
 		Thread_start     =  0,  // thread start proto
 		Interrupt        = -1,  // interrupt proto
 		Pagefault        = -2,  // pagefault proto
+		Io_pagefault     = -3,  // IO pagefault proto
 		System_exception = -4,  // for all architectures
 		Arch_exception   = -5,  // architecture specific exceptions
 		Force_exception  = -6,  // user raised force exception
@@ -726,13 +781,13 @@ public:
 		struct
 		{
 			enum { Label_width = sizeof(word_t) * 8 - 20 -WRM_ext };  // 12/44 for 32/64-bit systems
-			long    label          : Label_width; // msg label for PROTO msg
+			long     label          : Label_width; // msg label for PROTO msg
 			unsigned null           : 1; // 0
-			unsigned rwx            : 3; // pahefault access
+			unsigned rwx            : 3; // pagefault access
 			unsigned nulls          : 4; // result of IPC operation
 			unsigned typed_words    : 6;
 			unsigned untyped_words  : 6 +WRM_ext;
-		} _proto_pf;
+		} _proto_pf; // memory pfault or io pfault
 		struct
 		{
 			enum { Label_width = sizeof(word_t) * 8 - 20 -WRM_ext };  // 12/44 for 32/64-bit systems
@@ -746,31 +801,57 @@ public:
 	L4_msgtag_t(word_t v=0) : _raw(v) {}
 
 	// API for ipc msg
-	inline word_t raw()                   const { return _raw;       }
-	inline long   ipc_label()             const { return _ipc.label; }
-	inline bool   ipc_is_failed()         const { return _ipc.error; }
-	inline void   ipc_label(long l)             { _ipc.label = l;    }
-	inline void   ipc_set_ok()                  { _ipc.error = 0;    }
-	inline void   ipc_set_failed()              { _ipc.error = 1;    }
-	inline void   ipc_set_failed(bool err)      { _ipc.error = err;  }
+	inline word_t   raw()                   const { return _raw;       }
+	inline long     ipc_label()             const { return _ipc.label; }
+	inline bool     ipc_is_failed()         const { return _ipc.error; }
+	inline void     ipc_label(long l)             { _ipc.label = l;    }
+	inline void     ipc_set_ok()                  { _ipc.error = 0;    }
+	inline void     ipc_set_failed()              { _ipc.error = 1;    }
+	inline void     ipc_set_failed(bool err)      { _ipc.error = err;  }
+
+	void set_ipc(long label, unsigned untyped, unsigned typed)
+	{
+		_raw = 0;
+		_ipc.label         = label;
+		_ipc.typed_words   = typed;
+		_ipc.untyped_words = untyped;
+	}
 
 	// API for proto msg
-	inline long   proto_label()           const { return _proto.label; }
-	inline void   proto_label(long v)           { _proto.label = v;    }
-	inline void   proto_nulls()                 { _proto.nulls = 0;    }
+	inline long     proto_label()           const { return _proto.label; }
+	inline void     proto_label(long v)           { _proto.label = v;    }
+	inline void     proto_nulls()                 { _proto.nulls = 0;    }
+
+	void set_proto(int label, unsigned untyped, unsigned typed)
+	{
+		_proto.label         = label;
+		_proto.nulls         = 0;
+		_proto.typed_words   = typed;
+		_proto.untyped_words = untyped;
+	}
 
 	// API for pagefault proto msg
 	inline unsigned pfault_access()         const { return _proto_pf.rwx; }
-	inline void   pfault_access(unsigned v)       { _proto_pf.rwx = v;    }
+	inline void     pfault_access(unsigned v)     { _proto_pf.rwx = v;    }
+
+	void set_proto_pf(int label, unsigned access, unsigned untyped, unsigned typed)
+	{
+		_proto_pf.label         = label;
+		_proto_pf.null          = 0;
+		_proto_pf.rwx           = access;
+		_proto_pf.nulls         = 0;
+		_proto_pf.typed_words   = typed;
+		_proto_pf.untyped_words = untyped;
+	}
 
 	// API for any msg
-	inline unsigned typed()               const { return _ipc.typed_words;   }
-	inline unsigned untyped()             const { return _ipc.untyped_words; }
-	inline bool   propagated()            const { return _ipc.propagated; }
+	inline unsigned typed()                 const { return _ipc.typed_words;   }
+	inline unsigned untyped()               const { return _ipc.untyped_words; }
+	inline bool     propagated()            const { return _ipc.propagated;    }
 
-	inline void   typed(unsigned v)             { _ipc.typed_words   = v;    }
-	inline void   untyped(unsigned v)           { _ipc.untyped_words = v;    }
-	inline void   propagated(bool v)            { _ipc.propagated    = v;    }
+	inline void     typed(unsigned v)             { _ipc.typed_words   = v;    }
+	inline void     untyped(unsigned v)           { _ipc.untyped_words = v;    }
+	inline void     propagated(bool v)            { _ipc.propagated    = v;    }
 
 	inline bool is_thread_start() const
 	{
@@ -783,6 +864,16 @@ public:
 	}
 
 	inline bool is_pf_reply() const
+	{
+		return ipc_label()==0  &&  typed()==2  &&  untyped()==0;
+	}
+
+	inline bool is_io_pf_request() const
+	{
+		return proto_label()==Io_pagefault  &&  typed()==2  &&  untyped()==0;
+	}
+
+	inline bool is_io_pf_reply() const
 	{
 		return ipc_label()==0  &&  typed()==2  &&  untyped()==0;
 	}

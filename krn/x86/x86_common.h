@@ -10,6 +10,7 @@
 #include "krn-config.h"
 #include "printk.h"
 #include "wlibc_panic.h"
+#include "arch_data.h"
 #include <string.h>
 
 //--------------------------------------------------------------------------------------------------
@@ -18,7 +19,7 @@
 
 #ifdef Cfg_arch_x86
 // struct describing a Task State Segment
-struct Tss_t
+struct Hw_tss_t
 {
 	uint32_t prev_tss;
 	uint32_t esp0;       // will load in kernel entry
@@ -54,7 +55,7 @@ struct Tss_t
 	inline void init()
 	{
 		// init TSS
-		memset(this, 0, sizeof(Tss_t));
+		memset(this, 0, sizeof(Hw_tss_t));
 		ss0  = 0x10;  // kernel stack segment
 		esp0 = 0;     // kernel stack pointer will be set after
 
@@ -77,10 +78,8 @@ struct Tss_t
 		asm volatile ("push %ax;  mov $0x2b, %ax;  ltr %ax;  pop %ax");
 	}
 } __attribute__((packed));
-
 #else // Cfg_arch_x86_64
-
-struct Tss_t
+struct Hw_tss_t
 {
 	uint32_t	reserved1;
 	uint64_t	rsp0;
@@ -91,15 +90,14 @@ struct Tss_t
 	uint64_t	ist[7];
 	uint32_t	reserved4;
 	uint32_t	reserved5;
-	uint32_t	iobase;
+	uint16_t	reserved6;
+	uint16_t	iomap_base;
 
 	inline void set_ksp(uint64_t sp) { rsp0 = sp; }
 	inline uint64_t get_ksp() const  { return rsp0; }
 
 	inline void init()
 	{
-		//assert(false && "IMPL ME");
-
 		// Load the index of our TSS structure - The index is
 		// 0x28, as it is the 5th selector and each is 8 bytes
 		// long, but we set the bottom two bits (making 0x2b)
@@ -109,6 +107,19 @@ struct Tss_t
 	}
 } __attribute__((packed));
 #endif
+
+struct Tss_t
+{
+	Hw_tss_t hw;
+	Io_bitmap_t io_bitmap;
+
+	void init()
+	{
+		hw.init();
+		io_bitmap.init();
+		hw.iomap_base = (long)&io_bitmap - (long)this;
+	}
+};
 
 enum
 {
@@ -238,12 +249,17 @@ Tss_t tss;
 
 void set_ksp(long ksp)
 {
-	tss.set_ksp(ksp);
+	tss.hw.set_ksp(ksp);
 }
 
 long get_ksp()
 {
-	return tss.get_ksp();
+	return tss.hw.get_ksp();
+}
+
+void set_cur_ioperm(const Io_bitmap_t* src)
+{
+	tss.io_bitmap.set_from(src);
 }
 
 #ifdef Cfg_arch_x86

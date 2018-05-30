@@ -10,20 +10,22 @@
 #include "kmem.h"
 #include "kkip.h"
 #include "wlibc_assert.h"
+#include "arch_data.h"
 
 //--------------------------------------------------------------------------------------------------
 class Task_t
 {
 	static unsigned _counter;         // for set id
 
-	unsigned   _id;                   //
-	char       _name[8];              // space's name for debug
-	Aspace     _aspace;               // virtual address space
-	L4_fpage_t _kip_area;             // KIP area for user address space
-	L4_fpage_t _utcb_area;            // UTCBs area for user address space
-	L4_thrid_t _redirector;           //
-	unsigned   _threads_max;          //
-	unsigned   _threads_act;          //
+	unsigned    _id;                  //
+	char        _name[8];             // space's name for debug
+	Aspace      _aspace;              // virtual address space
+	L4_fpage_t  _kip_area;            // KIP area for user address space
+	L4_fpage_t  _utcb_area;           // UTCBs area for user address space
+	L4_thrid_t  _redirector;          //
+	unsigned    _threads_max;         //
+	unsigned    _threads_act;         //
+	Arch_task_t _arch;                //
 
 public:
 
@@ -158,14 +160,10 @@ public:
 		return _kip_area.addr();
 	}
 
-	inline void set_current()
+	inline void set_current(bool force = false)
 	{
-		_aspace.set_current();
-	}
-
-	inline void set_current_force()
-	{
-		_aspace.set_current_force();
+		_aspace.set_current(force);
+		_arch.set_current();
 	}
 
 	bool is_configured()
@@ -193,6 +191,21 @@ public:
 	inline void dump()
 	{
 		_aspace.dump();
+	}
+
+	inline void set_ioperm_all(int enable)
+	{
+		_arch.set_ioperm_all(enable);
+	}
+
+	inline void set_ioperm(unsigned port, unsigned sz, int enable)
+	{
+		_arch.set_ioperm(port, sz, enable);
+	}
+
+	inline int is_ioperm(unsigned port, unsigned sz, int enable)
+	{
+		return _arch.is_ioperm(port, sz, enable);
 	}
 };
 

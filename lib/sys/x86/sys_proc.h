@@ -40,10 +40,27 @@ public:
 		sp(addr + sz);
 	}
 
-	static inline void jump(long addr)
+	static inline void jump(long addr) __attribute__((noreturn))
 	{
 		asm volatile ("jmp *%0" :: "r"(addr));
+		while (1) {}
 	}
+
+	// no inline to have incomming vars on the stack
+	static void set_new_stack_area_and_jump(addr_t stack, size_t sz, addr_t addr) __attribute__((noinline,noreturn))
+	{
+		asm volatile
+		(
+			"mov    %0, %%eax     \n"
+			"add    %1, %%eax     \n"
+			"mov    %2, %%ecx     \n"
+			"mov    %%eax, %%esp  \n"
+			"jmp    *%%ecx        \n"
+			:: "r"(stack), "r"(sz), "r"(addr)
+		);
+		while (1) {}
+	}
+
 
 	static inline word_t eax() { word_t v; asm volatile("mov %%eax, %0" : "=r"(v)); return v; }
 	static inline word_t ecx() { word_t v; asm volatile("mov %%ecx, %0" : "=r"(v)); return v; }
@@ -53,12 +70,12 @@ public:
 	static inline word_t ebp() { word_t v; asm volatile("mov %%ebp, %0" : "=r"(v)); return v; }
 	static inline word_t esi() { word_t v; asm volatile("mov %%esi, %0" : "=r"(v)); return v; }
 	static inline word_t edi() { word_t v; asm volatile("mov %%edi, %0" : "=r"(v)); return v; }
-	static inline word_t cs()  { word_t v; asm volatile("mov %%cs, %0" : "=r"(v)); return v; }
-	static inline word_t ss()  { word_t v; asm volatile("mov %%ss, %0" : "=r"(v)); return v; }
-	static inline word_t ds()  { word_t v; asm volatile("mov %%ds, %0" : "=r"(v)); return v; }
-	static inline word_t es()  { word_t v; asm volatile("mov %%es, %0" : "=r"(v)); return v; }
-	static inline word_t fs()  { word_t v; asm volatile("mov %%fs, %0" : "=r"(v)); return v; }
-	static inline word_t gs()  { word_t v; asm volatile("mov %%gs, %0" : "=r"(v)); return v; }
+	static inline word_t cs()  { word_t v; asm volatile("mov %%cs,  %0" : "=r"(v)); return v; }
+	static inline word_t ss()  { word_t v; asm volatile("mov %%ss,  %0" : "=r"(v)); return v; }
+	static inline word_t ds()  { word_t v; asm volatile("mov %%ds,  %0" : "=r"(v)); return v; }
+	static inline word_t es()  { word_t v; asm volatile("mov %%es,  %0" : "=r"(v)); return v; }
+	static inline word_t fs()  { word_t v; asm volatile("mov %%fs,  %0" : "=r"(v)); return v; }
+	static inline word_t gs()  { word_t v; asm volatile("mov %%gs,  %0" : "=r"(v)); return v; }
 
 	static inline word_t eflags() { word_t v; asm volatile("pushf; pop %0" : "=r"(v)); return v; }
 	static inline word_t eip()    { word_t v; asm volatile("call 1f; 1: pop %0" : "=r"(v)); return v; }
@@ -72,7 +89,7 @@ public:
 	static inline void cr4(word_t v) { asm volatile("mov %0, %%cr4" :: "r"(v)); }
 
 	static inline word_t sp()  { word_t r=0; asm volatile ("mov %%esp, %0" : "=r"(r));  return r; }
-	static inline void sp(word_t r)        {  asm volatile("mov %0, %%esp" : : "r"(r));  }
+	static inline void sp(word_t r) {  asm volatile("mov %0, %%esp" :: "r"(r));  }
 
 	static inline void enable_irq() { asm volatile ("sti"); }
 	static inline void disable_irq() { asm volatile ("cli"); }
@@ -81,6 +98,28 @@ public:
 	static inline int is_phys_copy_supported() { return 0; }
 	static inline void store_phys_word(word_t val, addr_t pa) { (void)val; (void)pa; }
 	static inline word_t load_phys_word(addr_t pa) { (void)pa; return -1; }
+
+	static inline unsigned cpuid() { return 0; }                           // FIXME:  IMPLME
+
+	static inline void rmb()        { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+	static inline void wmb()        { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+	static inline void wait_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+	static inline void send_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+
+	static inline void dcache_flush()
+	{
+		// FIXME:  IMPLME
+	}
+
+	static inline void dcache_inval()
+	{
+		// FIXME:  IMPLME
+	}
+
+	static inline void icache_inval()
+	{
+		// FIXME:  IMPLME
+	}
 };
 
 #endif // SYS_PROC_H

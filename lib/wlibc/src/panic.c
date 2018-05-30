@@ -9,11 +9,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-void panic(const char* fmt, ...)
+void do_panic(const char* file, unsigned line, const char* func, const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
-	printf("\nPanic:  ");
+	printf("\nPanic:  %s:%u:%s:  ", file, line, func);
 	vprintf(fmt, args);
 	printf("\n");
 	va_end(args);

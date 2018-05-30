@@ -920,7 +920,7 @@ int vsscanf(const char* str, const char* format, va_list args)
 
 int vsprintf(char* buf, const char* format, va_list args)
 {
-	enum { Big_sz = -1 };
+	enum { Big_sz = 0x7fffffff };
 	return vsnprintf(buf, Big_sz, format, args);
 }
 
@@ -938,7 +938,7 @@ int sprintf(char* buf, const char* format, ...)
 	// may be optimized
 	va_list args;
 	va_start(args, format);
-	enum { Big_sz = -1 };
+	enum { Big_sz = 0x7fffffff };
 	int res = vsnprintf(buf, Big_sz, format, args);
 	va_end(args);
 	return res;

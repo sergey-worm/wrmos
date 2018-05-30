@@ -5,6 +5,7 @@
 //##################################################################################################
 
 #include "l4_api.h"
+#include "l4_thrid.h"
 #include "wrmos.h"
 #include "list.h"
 #include "sys_utils.h"
@@ -127,8 +128,8 @@ int main()
 
 	// create Roottask thread/aspace via ThreadControl
 
-	L4_thrid_t sgm0  = L4_thrid_t::create_global(l4_kip()->thread_info.user_base(), 1);
-	L4_thrid_t rtsk  = L4_thrid_t::create_global(l4_kip()->thread_info.user_base() + 1, 1);
+	L4_thrid_t sgm0  = l4_thrid_sigma0();
+	L4_thrid_t rtsk  = l4_thrid_roottask();
 	L4_thrid_t space = rtsk; // =dest for aspace creation
 	L4_thrid_t sched = sgm0;
 	L4_thrid_t pager = L4_thrid_t::Nil;
@@ -262,9 +263,7 @@ int main()
 			L4_fpage_t map_fpage = L4_fpage_t::create_nil();
 			if (req_fpage.base() != -1)
 			{
-				// TODO:  read docs, I suppose that req_fpage.addr() = phys_addr
-				//l4_kdb("IMPLEMENT ME:  rtsk requests memory with b != -1");
-
+				// IO-map request, map requested fpage 1:1
 				map_fpage = req_fpage;
 			}
 			else

@@ -555,13 +555,6 @@ int main(int argc, const char* argv[])
 
 	wrm_logi("my global_id=0x%x/%u.\n", l4_utcb()->global_id().raw(), l4_utcb()->global_id().number());
 
-
-	// FIXME:  get app memory from Alpha
-	static uint8_t memory [4*Cfg_page_sz] __attribute__((aligned(4*Cfg_page_sz)));
-	wrm_mpool_add(L4_fpage_t::create((addr_t)memory, sizeof(memory), Acc_rw));
-	// ~FIXME
-
-
 	// map IO
 	addr_t ioaddr = -1;
 	size_t iosize = -1;

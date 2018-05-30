@@ -1,6 +1,6 @@
 //##################################################################################################
 //
-//  boot1 - need for load all image and run main bootloader.
+//  boot1 - need for load whole image from disk to RAM and run main bootloader.
 //
 //  NOTE:  no constructors, no bss initializations.
 //
@@ -13,11 +13,6 @@
 
 #define UART_WITH_VIDEO
 #include "uart.h"
-
-// data for x86 video output (video.h)
-unsigned video_x;
-unsigned video_y;
-uintptr_t video_mem;
 
 #define INL __attribute__((always_inline)) inline
 

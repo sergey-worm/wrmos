@@ -14,14 +14,15 @@
 #  system params
 #---------------------------------------------------------------------------------------------------
 
-arch         = sparc
-cpu          = leon3
-plat         = qemu
-brd          = qemu_leon3
-sys_clock_hz = 40000000
-ram_start    = 0x40000000
-ram_sz       = 0x8000000
-page_sz      = 0x1000
+arch             = sparc
+cpu              = leon3
+plat             = qemu
+brd              = qemu_leon3
+max_cpus         = 4
+sys_clock_hz     = 40000000
+ram_start        = 0x40000000
+ram_sz           = 0x8000000
+page_sz          = 0x1000
 
 #---------------------------------------------------------------------------------------------------
 #  kernel params

@@ -14,7 +14,7 @@
 #include "l4_kdbops.h"
 #include "l4_ipcerr.h"
 
-//==================================================================================================
+
 class Threads_t
 {
 	enum
@@ -50,7 +50,7 @@ private:
 
 	static threads_t* ready_threads(unsigned prio)
 	{
-		assert(prio <= Thread_t::Prio_max);
+		wassert(prio <= Thread_t::Prio_max);
 		return &_ready_threads[prio];
 	}
 
@@ -187,9 +187,9 @@ public:
 	static Thread_t* create(L4_thrid_t globid, L4_thrid_t sched, L4_thrid_t pager, Task_t* tsk, uint8_t prio, const char* name)
 	{
 		printk("new thread:  id=0x%lx/%u, prio=%u, name=%s.\n", globid.raw(), globid.number(), prio, name);
-		assert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
+		wassert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
 		Thread_t* thr = &_threads[globid.number() - Thread_number_min];
-		assert(thr->state() == Thread_t::Idle);
+		wassert(thr->state() == Thread_t::Idle);
 		thr->task(tsk);
 		thr->name(name);
 		thr->globid(globid);
@@ -201,15 +201,14 @@ public:
 	}
 
 	// create kernel thread
-	inline static void create_kthread_and_go(void* entry_point, Task_t* tsk, const char* name)
+	static void create_kthread_and_go(void* entry_point, Task_t* tsk, const char* name) __attribute__((noreturn))
 	{
-		L4_thrid_t globid = L4_thrid_t::create_global(get_kip()->thread_info.system_base(), 1);
+		L4_thrid_t globid = L4_thrid_t::create_global(get_kip()->thread_info.system_base());
 		Thread_t* thr = create(globid, globid, globid, tsk, Thread_t::Prio_min, name);
 		thr->state(Thread_t::Ready);
 		thr->tmevent_resume(SystemClock_t::sys_clock(__func__));
 		Sched_t::current(thr);
-		Proc::set_new_stack_area(thr->kstack_area(), thr->kstack_sz());
-		Proc::jump((addr_t)entry_point);
+		Proc::set_new_stack_area_and_jump(thr->kstack_area(), thr->kstack_sz(), (addr_t)entry_point);
 	}
 
 	static Thread_t* find(unsigned thrid_num)
@@ -260,14 +259,14 @@ public:
 	                            bool* propagated, bool* use_local_id)
 	{
 		// check state
-		assert(snd->is_snd_state());
+		wassert(snd->is_snd_state());
 
 		bool local = snd->task() == rcv.task();     // is 'snd' local thread for 'rcv'
 
 		// check partner destination
-		assert(!snd->ipc_to().is_nil());
-		assert(!snd->ipc_to().is_any());
-		assert(!snd->ipc_to().is_any_local());
+		wassert(!snd->ipc_to().is_nil());
+		wassert(!snd->ipc_to().is_any());
+		wassert(!snd->ipc_to().is_any_local());
 		if (!(local  &&  snd->ipc_to() == rcv.localid())  &&
 		    !(           snd->ipc_to() == rcv.globid()))
 			return false;
@@ -381,9 +380,9 @@ public:
 	// find interrupt partner for receive thread
 	static Int_thread_t* find_int_sender(const Thread_t& rcv, L4_thrid_t from_spec)
 	{
-		assert(thrid_is_int(from_spec));
+		wassert(thrid_is_int(from_spec));
 		Int_thread_t* ithr = int_thread(from_spec.number());
-		assert(ithr);
+		wassert(ithr);
 		if (ithr->is_active() && ithr->is_pending() && ithr->handler()==rcv.globid())
 			return ithr;
 		return 0;
@@ -393,7 +392,7 @@ public:
 	{
 		unsigned prio = thr->prio();
 		threads_t* que = ready_threads(prio);
-		assert(!is_exist(que, thr));
+		wassert(!is_exist(que, thr));
 		que->push_back(thr);
 		unsigned bits_group = prio / (sizeof(bits_t)*8);
 		_ready_bits[bits_group] |= 1 << (prio - bits_group * (sizeof(bits_t)*8));
@@ -404,7 +403,7 @@ public:
 	{
 		unsigned prio = (*it)->prio();
 		threads_t* que = ready_threads(prio);
-		assert(is_exist(que, it));
+		wassert(is_exist(que, it));
 		que->erase(it);
 		if (que->empty())
 		{
@@ -417,8 +416,8 @@ public:
 	// replace cur thread at the end of que and set new timeslice
 	static threads_t::iter_t timeslice_expired(Thread_t* thr, threads_t* que = 0)
 	{
-		assert(!thr->timeslice());
-		assert(thr->state() == Thread_t::Ready);
+		wassert(!thr->timeslice());
+		wassert(thr->state() == Thread_t::Ready);
 		if (!que)
 			que = ready_threads(thr->prio());
 		thr->timeslice(Kcfg::Timeslice_usec);
@@ -447,7 +446,7 @@ public:
 					{
 						unsigned prio = sizeof(bits_t)*8*i + j;
 						threads_t* que = ready_threads(prio);
-						assert(que->size());
+						wassert(que->size());
 						threads_t::iter_t it = que->begin();
 						if (!(*it)->timeslice())
 							it = timeslice_expired(*it, que);
@@ -463,14 +462,14 @@ public:
 	// add ordered by timeout and prio
 	static threads_t::iter_t add_send(Thread_t* thr)
 	{
-		assert(!is_exist(&_send_threads, thr));
+		wassert(!is_exist(&_send_threads, thr));
 		_send_threads.push_back(thr);
 		return _send_threads.last();
 	}
 
 	static threads_t::iter_t del_send(threads_t::iter_t it)
 	{
-		assert(is_exist(&_send_threads, it));
+		wassert(is_exist(&_send_threads, it));
 		_send_threads.erase(it);
 		return _send_threads.end();
 	}
@@ -479,7 +478,7 @@ private:
 	// add ordered by timeout and prio
 	static threads_t::iter_t add_timeout_waiting(Thread_t* thr, threads_t* list)
 	{
-		assert(!is_exist(list, thr));
+		wassert(!is_exist(list, thr));
 		for (threads_t::iter_t it=list->begin(); it!=list->end(); ++it)
 		{
 			if ((*it)->timeout() > thr->timeout()  ||
@@ -495,7 +494,7 @@ private:
 
 	static threads_t::iter_t del_timeout_waiting(threads_t::iter_t it, threads_t* list)
 	{
-		assert(is_exist(list, it));
+		wassert(is_exist(list, it));
 		list->erase(it);
 		return list->end();
 	}
@@ -507,7 +506,7 @@ private:
 		for (threads_t::iter_t it=list->begin(); it!=list->end(); )
 		{
 			Thread_t* t = *it;
-			assert(t->state() == Thread_t::Send_ipc  ||  t->state() == Thread_t::Receive_ipc);
+			wassert(t->state() == Thread_t::Send_ipc  ||  t->state() == Thread_t::Receive_ipc);
 
 			if (t->timeout() > now)
 				break;
@@ -528,7 +527,7 @@ private:
 			if (!t->prio_heir().is_nil())
 			{
 				Thread_t* thr = threads_find(t->prio_heir());  // XXX optimize it
-				assert(thr);
+				wassert(thr);
 				thr->inherit_prio_del(t->globid(), t->prio_max());
 				t->prio_heir(L4_thrid_t::Nil);
 			}
@@ -540,25 +539,25 @@ public:
 
 	static threads_t::iter_t add_rcv_timeout_waiting(Thread_t* thr)
 	{
-		assert(thr->state() == Thread_t::Receive_ipc);
+		wassert(thr->state() == Thread_t::Receive_ipc);
 		return add_timeout_waiting(thr, &_timeout_waiting_rcv_threads);
 	}
 
 	static threads_t::iter_t add_snd_timeout_waiting(Thread_t* thr)
 	{
-		assert(thr->state() == Thread_t::Send_ipc);
+		wassert(thr->state() == Thread_t::Send_ipc);
 		return add_timeout_waiting(thr, &_timeout_waiting_snd_threads);
 	}
 
 	static threads_t::iter_t del_rcv_timeout_waiting(threads_t::iter_t it)
 	{
-		assert((*it)->state() == Thread_t::Receive_ipc);
+		wassert((*it)->state() == Thread_t::Receive_ipc);
 		return del_timeout_waiting(it, &_timeout_waiting_rcv_threads);
 	}
 
 	static threads_t::iter_t del_snd_timeout_waiting(threads_t::iter_t it)
 	{
-		assert((*it)->state() == Thread_t::Send_ipc);
+		wassert((*it)->state() == Thread_t::Send_ipc);
 		return del_timeout_waiting(it, &_timeout_waiting_snd_threads);
 	}
 

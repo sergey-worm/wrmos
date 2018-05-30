@@ -17,6 +17,7 @@
 #include "thrid.h"
 #include "tmaccount.h"
 #include "arch.h"
+#include "wlibc_assert.h"
 
 class Thread_t;
 typedef list_t <Thread_t*, Kcfg::Threads_max> threads_t;
@@ -237,7 +238,7 @@ public:
 	// allocate kstack and remap it to separate vspace with guard between stacks
 	void alloc_kstack()
 	{
-		assert(!_kstack_area && !_ksp);
+		wassert(!_kstack_area && !_ksp);
 		addr_t  va = kmem_alloc(Stack_sz, Cfg_page_sz);
 		paddr_t pa = kmem_paddr(va, Stack_sz);
 		addr_t  new_va = Aspace::kmap_kstack(pa, Stack_sz);
@@ -383,7 +384,7 @@ public:
 
 	inline void save_rcv_phase(L4_time_t timeout, L4_thrid_t from_spec)
 	{
-		assert(timeout.is_rel());
+		wassert(timeout.is_rel());
 		_ipc.timeout = timeout.is_never() ? -1 : SystemClock_t::sys_clock(__func__) + timeout.rel_usec();
 		_ipc.from_spec = from_spec;
 		state(Receive_ipc);
@@ -393,7 +394,7 @@ public:
 
 	inline void save_snd_phase(L4_time_t timeout, L4_thrid_t to)
 	{
-		assert(timeout.is_rel());
+		wassert(timeout.is_rel());
 		_ipc.timeout = timeout.is_never() ? -1 : SystemClock_t::sys_clock(__func__) + timeout.rel_usec();
 		_ipc.to = to;
 		state(Send_ipc);
@@ -442,8 +443,8 @@ public:
 	{
 		printk("inh_prio_add:  iam=%u:  owner=%u, prio=%u, inh_prio_list_sz=%zu.\n",
 			globid().number(), owner.number(), priority, _inherited_prios.size());
-		assert(owner != globid());
-		assert(inherit_prio_find(owner) == _inherited_prios.end());
+		wassert(owner != globid());
+		wassert(inherit_prio_find(owner) == _inherited_prios.end());
 		_inherited_prios.insert_sort(InheritedPrio_t(owner, priority));
 	}
 
@@ -453,9 +454,9 @@ public:
 			globid().number(), owner.number(), priority, _inherited_prios.size());
 		(void) priority;
 		inhprios_t::iter_t it = inherit_prio_find(owner);
-		assert(owner != globid());
-		assert(it != _inherited_prios.end());
-		assert(it->prio == priority);
+		wassert(owner != globid());
+		wassert(it != _inherited_prios.end());
+		wassert(it->prio == priority);
 		_inherited_prios.erase(it);
 	}
 
@@ -469,8 +470,8 @@ public:
 
 	bool is_good_sender(const Thread_t* snd, bool* use_local_id) const
 	{
-		assert(state() == Receive_ipc);
-		assert(_ipc.from_spec != L4_thrid_t::Nil);
+		wassert(state() == Receive_ipc);
+		wassert(_ipc.from_spec != L4_thrid_t::Nil);
 
 		*use_local_id = false;
 		bool local = task() == snd->task();                   // is 'snd' local thread
@@ -491,12 +492,12 @@ public:
 
 	bool is_irq_acceptable(unsigned irq)
 	{
-		assert(state() == Receive_ipc);
-		assert(_ipc.from_spec != L4_thrid_t::Nil);
+		wassert(state() == Receive_ipc);
+		wassert(_ipc.from_spec != L4_thrid_t::Nil);
 
 		// check rcv from
 		if (_ipc.from_spec.is_any()  ||                           // 'from' is any thread
-			_ipc.from_spec == L4_thrid_t::create_global(irq, 1))  // 'from' is equal
+			_ipc.from_spec == L4_thrid_t::create_irq(irq))        // 'from' is equal
 			return true;
 
 		return false;
@@ -505,13 +506,13 @@ public:
 	void activate()
 	{
 		printk("activate thread id=%u.\n", _id);
-		assert(!is_active() && "activate:  already active.");
-		assert(_utcb_pa && "activate:  no utcb location.");
-		assert(_task->is_configured() && "activate:  aspace has not been configured.");
+		wassert(!is_active() && "activate:  already active.");
+		wassert(_utcb_pa && "activate:  no utcb location.");
+		wassert(_task->is_configured() && "activate:  aspace has not been configured.");
 
 		// map utcb
 		addr_t utcb_uva = task()->alloc_utcb_area();
-		assert(utcb_uva);
+		wassert(utcb_uva);
 		_task->map(utcb_uva, _utcb_pa, Cfg_page_sz, Acc_utcb, Cachable);
 		_utcb_uva = utcb_uva;
 
@@ -521,18 +522,18 @@ public:
 
 	void start(addr_t entry_ip, addr_t sp)
 	{
-		assert(_state==Active && "Attemt to start inactivate thread.");
+		wassert(_state==Active && "Attemt to start inactivate thread.");
 
 		if (_id != 1) // is not sigma0
 		{
-			assert(!_pager_id.is_nil() && "Attemt to start thread without pager.");
-			assert(!_sched_id.is_nil() && "Attemt to start thread without scheduler.");
+			wassert(!_pager_id.is_nil() && "Attemt to start thread without pager.");
+			wassert(!_sched_id.is_nil() && "Attemt to start thread without scheduler.");
 
 			// XXX
 			// define pager, scheduler
 			_pager = threads_find(_pager_id);
 			_sched = threads_find(_sched_id);
-			assert(_pager && _sched);
+			wassert(_pager && _sched);
 
 			L4_utcb_t* p = utcb();
 			p->global_id(globid());
@@ -551,7 +552,7 @@ public:
 	inline void state(state_t s)
 	{
 		printk("%s:  %u:  state:  %s -> %s.\n", _name, globid().number(), state_str(), state_str(s));
-		assert(_state != s);
+		wassert(_state != s);
 
 		// delete from cur sched-list if need
 		if (_state == Ready)
@@ -590,7 +591,7 @@ public:
 		if (!prio_heir().is_nil())
 		{
 			Thread_t* thr = threads_find(prio_heir());
-			assert(thr);
+			wassert(thr);
 			thr->inherit_prio_del(globid(), prio_max());
 			prio_heir(L4_thrid_t::Nil);
 		}
@@ -604,16 +605,16 @@ public:
 
 	inline void utcb(addr_t va)
 	{
-		assert(!is_active() && "Attemt to set utcb_va for already activate thread.");
+		wassert(!is_active() && "Attemt to set utcb_va for already activate thread.");
 		_utcb_uva = va;
 	}
 
 	inline void utcb_location(paddr_t pa)
 	{
-		assert(!is_active() && "Attemt to set utcb_pa for already activate thread.");
+		wassert(!is_active() && "Attemt to set utcb_pa for already activate thread.");
 		_utcb_pa = pa;
 		_utcb_kva = Aspace::kmap_utcb(pa);
-		assert(_utcb_kva);
+		wassert(_utcb_kva);
 
 		// set user accesible thread name (wrm extention)
 		memcpy(kutcb()->tls, _name, 4);
@@ -634,9 +635,9 @@ public:
 	{
 		printk("%s:  entry=%lx, sp=%lx, _ksp=%lx, utcb=%lx.\n", __func__, entry, sp, _ksp, _utcb_uva);
 
-		assert(_ksp);
-		assert(_utcb_uva);
-		assert(entry);
+		wassert(_ksp);
+		wassert(_utcb_uva);
+		wassert(entry);
 
 		Stack::push(&_ksp, _flags);              // user_invoke() will use it from the stack
 		Stack::push(&_ksp, sp);                  // user_invoke() will use it from the stack
@@ -674,13 +675,13 @@ public:
 
 	Int_thread_t() :
 		_intno(_counter++),
-		_globid(L4_thrid_t::create_global(_intno, 1)),
+		_globid(L4_thrid_t::create_irq(_intno)),
 		_handler(L4_thrid_t::Nil),
 		_pending(false) {}
 
 	inline void handler(L4_thrid_t h)
 	{
-		assert(h.is_nil() || thrid_is_global_user(h));
+		wassert(h.is_nil() || thrid_is_global_user(h));
 		_handler = h;
 		_pending = false;
 		if (h.is_nil())

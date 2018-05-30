@@ -7,10 +7,10 @@
 ####################################################################################################
 
 # platform parameters
-include $(wrmdir)/cfg/plt/x86_64-qemu-q35.plt
+plt_file         = $(wrmdir)/cfg/plt/x86_64-qemu-q35.plt
 
 # toolchain
-gccprefix = x86_64-linux-
+gccprefix        = x86_64-linux-
 
 # debug flags
 usr_lib_dbg      = 1

@@ -38,10 +38,10 @@ typedef struct
 
 enum
 {
-	Proc_num =  2,
-	Irq_min  =  1,
-	Irq_max  = 15,  // regular irq max
-	Irq_emax = 31,  // irq max if extended irq is supported
+	Proc_num           =  2,     //
+	Irq_min            =  1,     //
+	Irq_max            = 15,     // regular irq max
+	Irq_emax           = 31,     // irq max if extended irq is supported
 
 	Status_ncpu_shift  = 28,     // 28-31, number of CPUs minus 1
 	Status_ncpu_mask   = 0xf,    // 
@@ -53,20 +53,24 @@ enum
 	CPU                = 0,      // FIXME: currently supported one CPU only
 };
 
-typedef void (*Intc_print_t)(const char* format, ...);
+typedef void (*Intc_print_t)(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
-inline unsigned ncpu(volatile Intc_regs_t* regs)
+inline unsigned _ncpu(volatile Intc_regs_t* regs)
 {
 	return 1 + ((regs->status >> Status_ncpu_shift) & Status_ncpu_mask);
+}
+
+inline unsigned intc_ncpu(unsigned long base_addr)
+{
+	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
+	return _ncpu(regs);
 }
 
 inline void intc_init(uintptr_t base_addr, Intc_print_t dprint)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
-
 	regs->pending = 0;  // clear all
-
-	print("Sparc IRQMP:    %d CPU%s.\n", ncpu(regs), ncpu(regs)>1?"s":"");
+	print("Sparc IRQMP:    %d CPU%s.\n", _ncpu(regs), _ncpu(regs)>1?"s":"");
 }
 
 static inline unsigned irqmax(volatile Intc_regs_t* regs)
@@ -79,12 +83,14 @@ inline int intc_unmask(uintptr_t base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
+	#ifdef DEBUG
 	if (irq < Irq_min  ||  irq > irqmax(regs))
-		return -1; // Intc_err_inval_irq;
+		return -1;  // Intc_err_inval_irq
 
 	unsigned eirq = (regs->status >> Status_eirq_shift) & Status_eirq_mask;
 	if (irq == eirq)
-		return -2; // Intc_err_inval_irq;
+		return -2;  // Intc_err_inval_irq
+	#endif
 
 	regs->proc_mask[CPU] |= 1 << irq;
 	return 0;
@@ -94,27 +100,32 @@ inline int intc_mask(uintptr_t base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
+	#ifdef DEBUG
 	if (irq < Irq_min  ||  irq > irqmax(regs))
-		return -1; // Intc_err_inval_irq;
+		return -1;  // Intc_err_inval_irq
 
 	unsigned eirq = (regs->status >> Status_eirq_shift) & Status_eirq_mask;
 	if (irq == eirq)
-		return -2; // Intc_err_inval_irq;
+		return -2;  // Intc_err_inval_irq
+	#endif
 
 	regs->proc_mask[CPU] &= ~(1 << irq);
 
-	return 0; // Intc_ok;
+	return 0;
 }
-
-inline void intc_dump(uintptr_t base_addr, Intc_print_t dprint);
 
 inline int intc_clear(uintptr_t base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
+	#ifdef DEBUG
+	if (irq < Irq_min  ||  irq > irqmax(regs))
+		return -1;  // Intc_err_inval_irq
+
 	unsigned eirq = (regs->status >> Status_eirq_shift) & Status_eirq_mask;
-	if (irq < Irq_min  ||  irq > irqmax(regs)  ||  irq == eirq)
-		return -2; // incorrect IRQ number
+	if (irq == eirq)
+		return -2;  // Intc_err_inval_irq
+	#endif
 
 	if (irq <= Irq_max)
 	{
@@ -129,6 +140,25 @@ inline int intc_clear(uintptr_t base_addr, unsigned irq)
 	return 0;
 }
 
+inline int intc_eoi(unsigned base_addr, unsigned irq)
+{
+	#ifdef DEBUG
+	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
+	if (irq < Irq_min  ||  irq > irqmax(regs))
+		return -1;  // Intc_err_inval_irq
+
+	unsigned eirq = (regs->status >> Status_eirq_shift) & Status_eirq_mask;
+	if (irq == eirq)
+		return -2;  // Intc_err_inval_irq
+	#else
+	(void) base_addr;
+	(void) irq;
+	#endif
+
+	// nothing for SPARC IRQMP
+	return 0;
+}
+
 inline bool intc_is_pending(uintptr_t base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
@@ -139,8 +169,10 @@ inline unsigned intc_real_irq(uintptr_t base_addr, unsigned irq)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
+	#ifdef DEBUG
 	if (irq < Irq_min  ||  irq > Irq_max)
 		return -2; // incorrect IRQ number
+	#endif
 
 	unsigned eirq = (regs->status >> Status_eirq_shift) & Status_eirq_mask;
 	if (irq == eirq)
@@ -155,7 +187,7 @@ inline void intc_dump(uintptr_t base_addr, Intc_print_t dprint)
 {
 	volatile Intc_regs_t* regs = (Intc_regs_t*) base_addr;
 
-	unsigned ncpu = 1 + ((regs->status >> Status_ncpu_shift) & Status_ncpu_mask);
+	unsigned ncpu = _ncpu(regs);
 
 	dprint("Sparc IRQMP:  ncpu=%d\n", ncpu);
 	dprint("  level:          0x%x\n", regs->level);
@@ -164,13 +196,13 @@ inline void intc_dump(uintptr_t base_addr, Intc_print_t dprint)
 	dprint("  clear:          0x%x\n", regs->clear);
 	dprint("  status:         0x%x\n", regs->status);
 
-	for (int i=0; i<ncpu; ++i)
+	for (unsigned i=0; i<ncpu; ++i)
 		dprint("  proc_mask[%d]:   0x%x\n", i, regs->proc_mask[i]);
 		
-	for (int i=0; i<ncpu; ++i)
+	for (unsigned i=0; i<ncpu; ++i)
 		dprint("  proc_force[%d]:  0x%x\n", i, regs->proc_force[i]);
 	
-	for (int i=0; i<ncpu; ++i)
+	for (unsigned i=0; i<ncpu; ++i)
 		dprint("  proc_eack[%d]:   0x%x\n", i, regs->proc_eack[i]);
 }
 
