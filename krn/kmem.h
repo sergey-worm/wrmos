@@ -580,6 +580,11 @@ public:
 		}
 	};
 
+	inline bool is_cur_aspace()
+	{
+		return _cur_mmu_ctxid == _id;
+	}
+
 private:
 
 	// convert virtual memory access to user-access-permission

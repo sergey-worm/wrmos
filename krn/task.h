@@ -166,6 +166,11 @@ public:
 		_arch.set_current();
 	}
 
+	inline bool is_cur_aspace()
+	{
+		return _aspace.is_cur_aspace();
+	}
+
 	bool is_configured()
 	{
 		return _kip_area.addr() && _kip_area.size() && _utcb_area.addr() && _utcb_area.size();

@@ -517,7 +517,9 @@ private:
 			int phase = t->state() == Thread_t::Send_ipc ? L4_snd_phase : L4_rcv_phase;
 			L4_utcb_t* utcb = t->utcb();
 			utcb->ipc_error_code(L4_ipcerr_t(phase, L4_ipc_timeout));
-			utcb->msgtag().ipc_set_failed();
+			L4_msgtag_t tag = utcb->msgtag();
+			tag.ipc_set_failed();
+			utcb->msgtag(tag);
 
 			threads_t::iter_t next_it = it + 1;
 			t->state(Thread_t::Ready);  // inside 'it' will be invalidate

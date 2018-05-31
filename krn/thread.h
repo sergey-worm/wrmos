@@ -599,7 +599,7 @@ public:
 
 	inline L4_utcb_t* uutcb() const { return (L4_utcb_t*) _utcb_uva; }  // used for intra aspace access
 	inline L4_utcb_t* kutcb() const { return (L4_utcb_t*) _utcb_kva; }  // used for other aspace access, don't forget flush dcache
-	inline L4_utcb_t*  utcb() const { return cur_thr()->task()==task() ? uutcb() : kutcb(); }
+	inline L4_utcb_t*  utcb() const { return task()->is_cur_aspace() ? uutcb() : kutcb(); }
 
 	inline paddr_t utcb_location() { return _utcb_pa; }
 
