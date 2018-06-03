@@ -196,6 +196,10 @@ inline void intc_dump(unsigned long base_addr, Intc_print_t dprint)
 	volatile uint32_t* clr_en   = regs->gicd.clr_en;
 	volatile uint32_t* set_pend = regs->gicd.set_pend;
 	volatile uint32_t* clr_pend = regs->gicd.clr_pend;
+	(void) set_en;
+	(void) clr_en;
+	(void) set_pend;
+	(void) clr_pend;
 
 	print("ARM GIC v1:\n");
 	print("  GICC:\n");

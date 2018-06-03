@@ -146,6 +146,7 @@ inline void timer_irq_ack(unsigned long base_addr)
 inline void timer_dump(unsigned long base_addr, Timer_print_t dprint)
 {
 	volatile Timer_regs_t* regs = (Timer_regs_t*) base_addr;
+	(void) regs;
 
 	print("Global timer:\n");
 	print("  counter_lo:      0x%08x\n", regs->counter_lo);

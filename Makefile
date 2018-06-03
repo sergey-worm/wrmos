@@ -28,9 +28,9 @@ export blddir   = $(abspath $B)
 export rtblddir = $(blddir)
 export wrmdir   = $(shell pwd)
 export cfgdir   = $(blddir)/config
-export prj_file = $(realpath $(P))
+export prj_file = $(realpath $P)
 
-include $(prj_file)
+include $P
 
 ramfs_files = $(foreach f,$(ldr_ramfs),$(word 2,$(subst :, ,$f)))
 ramfs_elfs = $(filter %.elf,$(ramfs_files))
