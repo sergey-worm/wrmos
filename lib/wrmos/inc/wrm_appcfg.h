@@ -24,10 +24,10 @@ public:
 		File_name_sz         = 32,
 		Arg_sz               = 16,
 		Arg_list_sz          =  4,
-		Dev_name_sz          = 12,
-		Dev_list_sz          = 12,
-		Mem_name_sz          = 12,
-		Mem_list_sz          =  4,
+		Dev_name_sz          = 16,
+		Dev_list_sz          = 32,
+		Mem_name_sz          = 16,
+		Mem_list_sz          = 16,
 
 		Malloc_on_pagefault  =  0,  // default
 		Malloc_on_startup    =  1,

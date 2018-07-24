@@ -28,7 +28,7 @@ class Io_device_t
 {
 public:
 
-	enum { Name_sz = 12 };
+	enum { Name_sz = Wrm_app_cfg_t::Dev_name_sz };
 
 private:
 
@@ -66,7 +66,7 @@ public:
 class Board_cfg_t
 {
 public:
-	enum { Devs_max = 12 };
+	enum { Devs_max = Wrm_app_cfg_t::Dev_list_sz };
 	Io_device_t devices [Devs_max];
 
 	const Io_device_t* devices_begin() const { return devices; }
@@ -74,7 +74,7 @@ public:
 
 class Memory_region_t
 {
-	enum { Name_sz = 12 };
+	enum { Name_sz = Wrm_app_cfg_t::Mem_name_sz };
 public:
 	char     name [Name_sz];
 	size_t   sz;
