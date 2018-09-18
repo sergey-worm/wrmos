@@ -167,12 +167,15 @@ public:
 	static inline void store_phys_word(word_t v, addr_t pa) { (void)v; (void)pa; } // unsupported
 	static inline word_t load_phys_word(addr_t pa) { (void)pa; return -1; }        // unsupported
 
-
+	// FIXME:  ???  mrc p15, 0, rX, c13, c0, 2  @ get the user r/w register
+	// FIXME:  ???  mrc15, 0, r4, cr13, cr0, {3}
+	static inline word_t tls() { word_t r; asm volatile ("mrc p15, 0, %0, c13, c0, 2" : "=r"(r)); return r; }
+	static inline void   tls(word_t v) { asm volatile ("mcr p15, 0, %0, c13, c0, 2" :: "r"(v)); }
 
 	static inline word_t mfcpsr() { word_t r; asm volatile ("mrs %0, cpsr" : "=r"(r)); return r; }
 	static inline void   mtcpsr(word_t v) { asm volatile ("msr cpsr, %0" :: "r"(v)); }
 
-	static inline word_t actlr()  { word_t r; asm volatile ("mrc p15, 0, %0, c1, c0, 1" : "=r"(r)); return r; }
+	static inline word_t actlr() { word_t r; asm volatile ("mrc p15, 0, %0, c1, c0, 1" : "=r"(r)); return r; }
 	static inline void   actlr(word_t v) { asm volatile ("mcr p15, 0, %0, c1, c0, 1" :: "r"(v)); }
 
 	// CP15 operations

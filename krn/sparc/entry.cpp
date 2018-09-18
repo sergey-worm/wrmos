@@ -87,7 +87,7 @@ extern "C" void sparc_entry_pagefault(word_t fault_addr, word_t fault_status, wo
 {
 	bool krn_mode = Proc::psr() & (1<<6);        // psr.ps, must be first operation in this func !
 	if (krn_mode)                                // access to unmapped kernel address
-		panic("Pagefault in kernel mode:  place=%d, dr=0x%lx, status=0x%lx, inst=0x%lx, psr=0x%lx, thr=%s.\n",
+		panic("PF in kernel:  place=%d, addr=0x%lx, status=0x%lx, inst=0x%lx, psr=0x%lx, thr=%s.\n",
 			place, fault_addr, fault_status, fault_inst, Proc::psr(), Sched_t::current()->name());
 
 	//Sched_t::current()->tmevent_kentry_end(SystemClock_t::sys_clock("pf_entry"));  // uncomment to time account

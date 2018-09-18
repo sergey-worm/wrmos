@@ -656,6 +656,12 @@ public:
 		return kva;
 	}
 
+	static void kunmap_utcb(addr_t va)
+	{
+		printk("Aspace::%s:  va=0x%lx.\n", __func__, va);
+		kunmap(va, Cfg_page_sz);
+	}
+
 	static addr_t kmap_kstack(paddr_t pa, size_t sz)
 	{
 		printk("Aspace::%s:  pa=0x%llx, sz=0x%zx.\n", __func__, (long long)pa, sz);

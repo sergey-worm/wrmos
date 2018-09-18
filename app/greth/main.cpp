@@ -606,23 +606,23 @@ int main(int argc, const char* argv[])
 	}
 
 	// create tx thread
-	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	L4_fpage_t stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	L4_fpage_t utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t txid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp.addr(), tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	rc = wrm_thr_create(utcb_fp.addr(), tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
 	                      "e-tx", Wrm_thr_flag_no, &txid);
 	wrm_logi("create_thread:  rc=%d, id=0x%x/%u.\n", rc, txid.raw(), txid.number());
 	assert(!rc && "failed to create tx thread");
 
 	// create rx thread
-	stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t rxid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp.addr(), rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	rc = wrm_thr_create(utcb_fp.addr(), rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
 	                      "e-rx", Wrm_thr_flag_no, &rxid);
 	wrm_logi("create_thread:  rc=%d, id=0x%x/%u.\n", rc, rxid.raw(), rxid.number());
 	assert(!rc && "failed to create rx thread");

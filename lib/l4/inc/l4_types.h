@@ -967,6 +967,8 @@ public:
 	uint8_t _reserve [ sizeof(word_t) - 2 ];  //  9      alignment
 
 	// User-level Thread Local Storage (UTLS)
+	// word 0 - thread name
+	// word 1 - errno
 	word_t tls [21];                          // 10..30  alignment
 
 	// Buffer Registers (BRs)

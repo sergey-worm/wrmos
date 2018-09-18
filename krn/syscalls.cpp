@@ -228,13 +228,12 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 			if (!pager.is_nil()           &&                  // thread will be activate and
 				(!tsk                     ||                  // task does not exist or
 				 !tsk->is_configured()    ||                  // task is not configured or
-				 !tsk->is_able_to_activate_new_thread()))     // task is not able to activate new thread
+				 tsk->is_full()))                             // task is not able to activate new thread
 			{
 				if (!tsk || !tsk->is_configured())
 					force_printk("tctl:  ERROR:  activation in not configured aspace.\n");
 				else
-					force_printk("tctl:  ERROR:  task is not able to activate new thread, maxthr=%u.\n",
-						tsk->threads_max());
+					force_printk("tctl:  ERROR:  task is full, not able to activate new thread.\n");
 				cur.uutcb()->error(3);  // InvalidSpace
 				return;
 			}
@@ -312,8 +311,22 @@ void syscall_thread_control(Thread_t& cur, Entry_frame_t& eframe)
 	// thread deletion
 	else if (space.is_nil() && dst_thr)
 	{
-		// TODO:  delete dst_thr, if it is last thread in Task --> delete task
-		panic("tctl:  Thread deletion isn't supported yet.\n");
+		printk("tctl:  delete thr=%u, task=%u.\n", dst_thr->id(), dst_thr->task()->id());
+
+		// TODO:  abort any ongoing IPC operations
+
+		// thread deletion
+		dst_thr->free_utcb_kspace();
+		Task_t* tsk = dst_thr->task();
+		tsk->free_utcb_uspace((addr_t)dst_thr->uutcb());
+		Threads_t::remove(dst);
+
+		// task deletion
+		if (tsk->is_empty())
+		{
+			printk("tctl:  delete task=%u.\n", tsk->id());
+			Tasks_t::remove(tsk);
+		}
 	}
 	else
 	{
@@ -522,7 +535,7 @@ void syscall_space_control(Thread_t& cur, Entry_frame_t& eframe)
 	Task_t* tsk = thr->task();
 
 	// ignore kip_area and utcb_area if exists active threads
-	if (!tsk->threads_active())
+	if (!tsk->active_threads())
 	{
 		if (!is_aligned(utcb_area.addr(), Cfg_page_sz)  ||  !is_aligned(utcb_area.size(), Cfg_page_sz)  ||
 			(utcb_area.access() & Acc_rw) != Acc_rw)

@@ -1,7 +1,7 @@
 #!/bin/bash
 ####################################################################################################
 #
-#  Sanity check wrmos.
+#  Sanity check for wrmos.
 #
 ####################################################################################################
 
@@ -49,9 +49,14 @@ result[$console_x86_exec]=-
 result[$console_x86_64_build]=-
 result[$console_x86_64_exec]=-
 
+res_ok='\e[1;32m+\e[0m'
+res_bad='\e[1;31m-\e[0m'
+
+errors=0
+
 function get_result
 {
-	if [ $rc == 0 ]; then echo '\e[1;32m+\e[0m'; else echo '\e[1;31m-\e[0m'; fi
+	if [ $rc == 0 ]; then echo $res_ok; else echo $res_bad; fi
 }
 
 function do_build
@@ -64,6 +69,7 @@ function do_build
 	rc=$?
 	echo "Build:  rc=$rc."
 	result[$id]=$(get_result $rc)
+	if [ ${result[$id]} != $res_ok ]; then ((errors++)); fi
 }
 
 function do_exec
@@ -91,9 +97,11 @@ function do_exec
 		if [ $prj == hello ]; then
 			expect -c "\
 				set timeout 10; \
-					if { [catch {spawn $run_qemu} reason] } { \
-						puts \"failed to spawn qemu: $reason\r\"; exit 1 }; \
-				expect \"hello:  bye-bye.\r\" { exit 0 }  timeout { exit 1 };  exit 2"
+				if { [catch {spawn $run_qemu} reason] } { \
+					puts \"failed to spawn qemu: $reason\r\"; exit 1 }; \
+				expect \"hello:  bye-bye.\r\" {}  timeout { exit 1 };
+				expect \"terminated.\r\"      {}  timeout { exit 2 };
+				exit 0"
 			rc=$?
 		else
 		if [ $prj == console ]; then
@@ -101,15 +109,16 @@ function do_exec
 				set timeout 10; \
 				if { [catch {spawn $run_qemu} reason] } { \
 					puts \"failed to spawn qemu: $reason\r\"; exit 1 }; \
-				expect \"Input a chars or Enter to exit:\" { }  timeout { exit 1 }; \
-				expect \"Input a chars or Enter to exit:\" { }  timeout { exit 2 }; \
+				expect \"Input a chars or Enter to exit:\" {}  timeout { exit 1 }; \
+				expect \"Input a chars or Enter to exit:\" {}  timeout { exit 2 }; \
 				send bye-1\r;
-				expect \"hello-1:  bye-bye.\r\" { }  timeout { exit 3 }; \
+				expect \"hello-1:  bye-bye.\r\"  {} timeout { exit 3 }; \
 				send \x05; \
-				expect \"new input app is *.\r\" { }  timeout { exit 4 } }; \
+				expect \"new input app is *.\r\" {} timeout { exit 4 }; \
 				send bye-2\r; \
-				expect \"hello-2:  bye-bye.\r\" { exit 0 }  timeout { exit 5 }; \
-				exit 6"
+				expect \"hello-2:  bye-bye.\r\"  {} timeout { exit 5 }; \
+				expect \"terminated.\r\"         {} timeout { exit 2 };
+				exit 0"
 			rc=$?
 		else
 			rc=100  # unknown project
@@ -121,6 +130,7 @@ function do_exec
 
 	echo -e "\nExecute:  rc=$rc."
 	result[$id]=$(get_result $rc)
+	if [ ${result[$id]} != $res_ok ]; then ((errors++)); fi
 }
 
 function do_all
@@ -169,3 +179,6 @@ echo -e "  console  arm     vexpress-a9         ${result[$console_arm_veca9_buil
 echo -e "  console  arm     xilinx-zynq-a9      ${result[$console_arm_zynqa9_build]}        ${result[$console_arm_zynqa9_exec]}"
 echo -e "  console  x86                         ${result[$console_x86_build]}        ${result[$console_x86_exec]}"
 echo -e "  console  x86_64                      ${result[$console_x86_64_build]}        ${result[$console_x86_64_exec]}"
+
+echo -e "errors:  $errors"
+exit $errors

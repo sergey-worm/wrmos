@@ -19,6 +19,7 @@
 extern "C" void __cxa_pure_virtual()
 {
 	// TODO:  add some error handler
+	assert(0 && "Implement me!");
 	while (1);
 }
 
@@ -42,12 +43,6 @@ extern "C" void __cxa_guard_abort(__guard*)
 {
 }
 
-extern "C" int atexit(void (*func) (void))
-{
-	//assert(0 && "Implement me!");
-	return 0;
-}
-
 void operator delete(void* ptr)
 {
 	assert(0 && "Implement me!");
@@ -63,6 +58,11 @@ void operator delete(void*, unsigned int)
 	assert(0 && "Implement me!");
 }
 
+void operator delete[](void*, unsigned int)
+{
+	assert(0 && "Implement me!");
+}
+
 void* operator new(size_t sz) throw()
 {
 	//printf("operator new:  size=%u.\n", sz);
@@ -74,3 +74,39 @@ void* operator new[](size_t sz)
 	//printf("operator new[]:  size=%u.\n", sz);
 	return operator new (sz);
 }
+
+//--------------------------------------------------------------------------------------------------
+// uClibc file ctype.h contents macro-implemented ctype-functions for C-code, but C++
+// For C++ put it here.
+//--------------------------------------------------------------------------------------------------
+
+extern "C" int isspace(int c)
+{
+	return c==' ' || c=='\t' || c=='\n' || c=='\v' || c=='\f' || c=='\r';
+}
+
+extern "C" int isdigit(int c)
+{
+	return c >= '0'  &&  c <= '9';
+}
+
+extern "C" int toupper(int c)
+{
+	if (c >= 'a'  &&  c <= 'z')
+		return c + 'A' - 'a';
+	else
+		return c;
+}
+
+extern "C" int tolower(int c)
+{
+	if (c >= 'A'  &&  c <= 'Z')
+		return c - 'A' + 'a';
+	else
+		return c;
+}
+
+//extern "C" int isprint(int c)
+//{
+//	return 0;
+//}

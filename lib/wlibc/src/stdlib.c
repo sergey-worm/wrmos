@@ -8,42 +8,83 @@
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
-#include <assert.h>
+#include <ctype.h>
 #include "sys_utils.h"
 #include "wlibc_cb.h"
+#include "wlibc_panic.h"
 
-#if 0
- #include <ctype.h> // FIXME:  undefined reference to `__ctype_b'
-#else
- int isdigit(int c);
- int isspace(int c);
-#endif
+// TODO:  do thread safe!
+typedef void(*exit_func_t)(void);
+enum { Exit_funcs_max = 32 };
+static exit_func_t exit_funcs[Exit_funcs_max];
+static unsigned exit_funcs_end = 0;
 
+int atexit(void (*func)(void))
+{
+	// TODO:  mtx lock
+	if (exit_funcs_end == Exit_funcs_max)
+		return -1;
+	exit_funcs[exit_funcs_end++] = func;
+	return 0;
+}
 
 void exit(int status)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
 	while (1);
 }
 
-int rand()
+
+void abort(void)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
+	while (1);
+}
+
+char* getenv(const char* name)
+{
+	printf("%s:  name=%s!\n", __func__, name);
+	//panic("%s:  implement me - name=%s!\n", __func__, name);
 	return 0;
+}
+
+static uint64_t _rand_next = 1;
+
+int rand(void)
+{
+	_rand_next = _rand_next * 11035152451103515245llu + 12345;
+	return (_rand_next >> (sizeof(int)*4)) % ((unsigned)RAND_MAX+1);
+}
+
+void srand(unsigned seed)
+{
+	_rand_next = seed;
 }
 
 void* malloc(size_t sz)
 {
-	//printf("%s:  size=%u.\n", __func__, sz);
-
+	//printf("%s:  size=%zu.\n", __func__, sz);
 	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
-	void* res = cb->malloc ? cb->malloc(sz) : 0;
+	void* res = 0;
+	if (cb->malloc)
+	{
+		res = cb->malloc(sz);
+		if (!res && sz && cb->malloc_empty)
+		{
+			int rc = cb->malloc_empty(sz);  // try to process empty malloc pool
+			if (!rc)
+				res = cb->malloc(sz);       // and alloc again
+		}
+	}
+	//printf("%s:  size=%zu, res=%p.\n", __func__, sz, res);
 	return res;
 }
 
 void free(void* ptr)
 {
-	assert(0 && "Implement me!");
+	Wlibc_callbacks_t* cb = wlibc_callbacks_get();
+	if (cb->free)
+		cb->free(ptr);
 }
 
 void* calloc(size_t num, size_t size)
@@ -53,6 +94,10 @@ void* calloc(size_t num, size_t size)
 	size_t sz = num * size;
 	void* res = malloc(sz);
 
+	// gcc may optimace calls malloc()+memset() to calloc(),
+	// to avoid this use compiler barrier
+	asm volatile("" ::: "memory");
+
 	if (sz && res)
 		memset(res, 0, sz);
 
@@ -60,14 +105,20 @@ void* calloc(size_t num, size_t size)
 	return res;
 }
 
+void* realloc(void* ptr, size_t size)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
 void qsort(void* base, size_t num, size_t size, int (*compar)(const void*,const void*))
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
 }
 
 float strtof(const char* str, char** endptr)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
 	return 0;
 }
 
@@ -91,7 +142,7 @@ int atoi(const char* str)
 
 long int strtol(const char* str, char** endptr, int base)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
 	return 0;
 }
 
@@ -415,4 +466,16 @@ done:
 		*endptr = (char*)p;
 
 	return negative ? -fraction : fraction;
+}
+
+size_t _stdlib_mb_cur_max(void)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+long double strtold(const char* str, char** endptr)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
 }

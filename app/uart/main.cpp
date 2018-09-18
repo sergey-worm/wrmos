@@ -231,7 +231,7 @@ size_t put_to_txbuf(const char* buf, unsigned sz)
 	return written;
 }
 
-int tx_thread(int unused)
+long tx_thread(long unused)
 {
 	wrm_logi("tx:  hello:  %s.\n", __func__);
 	wrm_logi("tx:  myid=%u.\n", l4_utcb()->global_id().number());
@@ -319,7 +319,7 @@ int tx_thread(int unused)
 	return 0;
 }
 
-int rx_thread(int unused)
+long rx_thread(long unused)
 {
 	wrm_logi("rx:  hello:  %s.\n", __func__);
 	wrm_logi("rx:  myid=%u.\n", l4_utcb()->global_id().number());
@@ -562,32 +562,32 @@ int main(int argc, const char* argv[])
 	// uart_init(ioaddr, 115200, 40*1000*1000/*?*/);
 
 	// create tx thread
-	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	L4_fpage_t stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	L4_fpage_t utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t txid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp, tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
-	                      "u-tx", Wrm_thr_flag_no, &txid);
+	rc = wrm_thr_create(utcb_fp, tx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	                    "u-tx", Wrm_thr_flag_no, &txid);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, txid.number());
 	if (rc)
 	{
-		wrm_loge("wrm_thread_create(tx) - rc=%d.", rc);
+		wrm_loge("wrm_thr_create(tx) - rc=%d.", rc);
 		return -4;
 	}
 
 	// create rx thread
-	stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
 	L4_thrid_t rxid = L4_thrid_t::Nil;
-	rc = wrm_thread_create(utcb_fp, rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
-	                      "u-rx", Wrm_thr_flag_no, &rxid);
+	rc = wrm_thr_create(utcb_fp, rx_thread, 0, stack_fp.addr(), stack_fp.size(), 255,
+	                    "u-rx", Wrm_thr_flag_no, &rxid);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, rxid.number());
 	if (rc)
 	{
-		wrm_loge("wrm_thread_create(rx) - rc=%d.\n", rc);
+		wrm_loge("wrm_thr_create(rx) - rc=%d.\n", rc);
 		return -5;
 	}
 

@@ -259,7 +259,7 @@ public:
 	inline word_t scall_exreg_control()   const { return syscall_frame.i1; }
 	inline word_t scall_exreg_sp()        const { return syscall_frame.i2; }
 	inline word_t scall_exreg_ip()        const { return syscall_frame.i3; }
-	inline word_t scall_exreg_ip2()       const { return global_frame.g7;  }
+	inline word_t scall_exreg_ip2()       const { return global_frame.g5;  }
 	inline word_t scall_exreg_pager()     const { return syscall_frame.i4; }
 	inline word_t scall_exreg_uhandle()   const { return syscall_frame.i5; }
 	inline word_t scall_exreg_flags()     const { return global_frame.g4;  }
@@ -267,7 +267,7 @@ public:
 	inline void   scall_exreg_control(word_t v)   { syscall_frame.i1 = v; }
 	inline void   scall_exreg_sp(word_t v)        { syscall_frame.i2 = v; }
 	inline void   scall_exreg_ip(word_t v)        { syscall_frame.i3 = v; }
-	inline void   scall_exreg_ip2(word_t v)       { global_frame.g7  = v; }
+	inline void   scall_exreg_ip2(word_t v)       { global_frame.g5  = v; }
 	inline void   scall_exreg_pager(word_t v)     { syscall_frame.i4 = v; }
 	inline void   scall_exreg_uhandle(word_t v)   { syscall_frame.i5 = v; }
 	inline void   scall_exreg_flags(word_t v)     { global_frame.g4  = v; }

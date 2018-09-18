@@ -186,7 +186,7 @@ public:
 	// create user thread
 	static Thread_t* create(L4_thrid_t globid, L4_thrid_t sched, L4_thrid_t pager, Task_t* tsk, uint8_t prio, const char* name)
 	{
-		printk("new thread:  id=0x%lx/%u, prio=%u, name=%s.\n", globid.raw(), globid.number(), prio, name);
+		printk("new thread:  id=%u, prio=%u, name=%s.\n", globid.number(), prio, name);
 		wassert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
 		Thread_t* thr = &_threads[globid.number() - Thread_number_min];
 		wassert(thr->state() == Thread_t::Idle);
@@ -197,7 +197,17 @@ public:
 		thr->pagerid(pager);
 		thr->prio(prio);
 		thr->state(Thread_t::Inactive);
+		thr->setup_kstack();
 		return thr;
+	}
+
+	// delete thread
+	static void remove(L4_thrid_t globid)
+	{
+		printk("del thread:  thrid=%u.\n", globid.number());
+		wassert(globid.number() >= Thread_number_min  &&  globid.number() <= Thread_number_max);
+		Thread_t* thr = &_threads[globid.number() - Thread_number_min];
+		thr->state(Thread_t::Idle);
 	}
 
 	// create kernel thread

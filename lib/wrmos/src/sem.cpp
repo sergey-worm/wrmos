@@ -59,13 +59,13 @@ static void resume(L4_thrid_t thr)
 
 extern "C" int wrm_sem_init(Wrm_sem_t* sem, int mode, unsigned value)
 {
-	if (mode != Wrm_sem_counting  &&  mode != Wrm_sem_binary)
+	if (mode & Wrm_sem_recursive  &&  !(mode & Wrm_sem_binary))
 	{
 		wrm_loge("sem=0x%p:  init:  wrong mode.\n", sem);
 		return 1;
 	}
 
-	if (value > Wrm_sem_t::Value_max)
+	if (value > Wrm_sem_value_max)
 	{
 		wrm_loge("sem=0x%p:  init:  too big value.\n", sem);
 		return 2;
@@ -75,7 +75,7 @@ extern "C" int wrm_sem_init(Wrm_sem_t* sem, int mode, unsigned value)
 	wrm_spinlock_init(&sem->lock);
 	sem->mode = mode;
 	sem->value = value;
-	if (mode == Wrm_sem_binary  &&  value)
+	if (mode & Wrm_sem_binary  &&  value)
 		sem->value = 1;
 	return 0;
 }
@@ -86,9 +86,9 @@ extern "C" int wrm_sem_destroy(Wrm_sem_t* sem)
 	return 0;
 }
 
-extern "C" int wrm_sem_value(Wrm_sem_t* sem, unsigned value)
+extern "C" int wrm_sem_setvalue(Wrm_sem_t* sem, unsigned value)
 {
-	if (value > Wrm_sem_t::Value_max)
+	if (value > Wrm_sem_value_max)
 	{
 		wrm_loge("sem=0x%p:  init:  too big value.\n", sem);
 		return 2;
@@ -96,8 +96,16 @@ extern "C" int wrm_sem_value(Wrm_sem_t* sem, unsigned value)
 
 	wrm_spinlock_lock(&sem->lock);
 	sem->value = value;
-	if (sem->mode == Wrm_sem_binary  &&  value)
+	if (sem->mode & Wrm_sem_binary  &&  value)
 		sem->value = 1;
+	wrm_spinlock_unlock(&sem->lock);
+	return 0;
+}
+
+extern "C" int wrm_sem_getvalue(Wrm_sem_t* sem, unsigned* value)
+{
+	wrm_spinlock_lock(&sem->lock);
+	*value = sem->value;
 	wrm_spinlock_unlock(&sem->lock);
 	return 0;
 }
@@ -112,13 +120,13 @@ static int dequeue(Wrm_sem_t* sem, L4_thrid_t thr)
 	{
 		if (sem->wait_queue[p] == thr)
 			found = true;
-		unsigned next_p = (p + 1) == Wrm_sem_t::Queue_length  ?  0  :  (p + 1);
+		unsigned next_p = (p + 1) == Wrm_sem_queue_length  ?  0  :  (p + 1);
 		if (found)
 			sem->wait_queue[p] = sem->wait_queue[next_p]; // move
 		p = next_p;
 	}
 	if (found)
-		sem->wp = !sem->wp ? (Wrm_sem_t::Queue_length - 1)  : (sem->wp - 1);
+		sem->wp = !sem->wp ? (Wrm_sem_queue_length - 1)  : (sem->wp - 1);
 	//wrm_logd("sem=0x%p:  wait:  timeout, erased (rp=%u, wp=%u).\n", sem, sem->rp, sem->wp);
 	return found;
 }
@@ -131,7 +139,7 @@ static int exist_in_queue(Wrm_sem_t* sem, L4_thrid_t thr)
 	{
 		if (sem->wait_queue[p] == thr)
 			return 1;
-		p = (p + 1) == Wrm_sem_t::Queue_length  ?  0  :  (p + 1);
+		p = (p + 1) == Wrm_sem_queue_length  ?  0  :  (p + 1);
 	}
 	return 0;
 }
@@ -149,8 +157,16 @@ extern "C" int wrm_sem_wait(Wrm_sem_t* sem, int timeout_usec)
 
 	wrm_spinlock_lock(&sem->lock);
 
+	if (sem->mode & Wrm_sem_recursive  &&  sem->owner == self)
+	{
+		wrm_spinlock_unlock(&sem->lock);
+		return 0;
+	}
+
 	if (sem->value)
 	{
+		if (sem->mode & Wrm_sem_binary)
+			sem->owner = self;
 		sem->value--;
 		wrm_spinlock_unlock(&sem->lock);
 		return 0;
@@ -164,7 +180,7 @@ extern "C" int wrm_sem_wait(Wrm_sem_t* sem, int timeout_usec)
 	}
 
 	// write thread to queue
-	unsigned next_wp = (sem->wp + 1) == Wrm_sem_t::Queue_length  ?  0  :  (sem->wp + 1);
+	unsigned next_wp = (sem->wp + 1) == Wrm_sem_queue_length  ?  0  :  (sem->wp + 1);
 	if (next_wp == sem->rp)
 	{
 		wrm_loge("sem=0x%p:  wait:  waiting queue is full.\n", sem);
@@ -211,9 +227,9 @@ extern "C" int wrm_sem_post(Wrm_sem_t* sem)
 {
 	//wrm_logd("sem=0x%p:  post:  entry.\n", sem);
 	wrm_spinlock_lock(&sem->lock);
-	if (sem->value == Wrm_sem_t::Value_max)
+	if (sem->value == Wrm_sem_value_max)
 	{
-		wrm_loge("sem=0x%p:  post:  too big value, max=%u, overflow.\n", sem, Wrm_sem_t::Value_max);
+		wrm_loge("sem=0x%p:  post:  too big value, max=%u, overflow.\n", sem, Wrm_sem_value_max);
 		wrm_spinlock_unlock(&sem->lock);
 		return 1;
 	}
@@ -226,16 +242,18 @@ extern "C" int wrm_sem_post(Wrm_sem_t* sem)
 		assert(!sem->value);
 		thr = sem->wait_queue[sem->rp];
 		assert(thr != l4_utcb()->global_id());
-		sem->rp = (sem->rp + 1) == Wrm_sem_t::Queue_length  ?  0  :  (sem->rp + 1);
+		sem->rp = (sem->rp + 1) == Wrm_sem_queue_length  ?  0  :  (sem->rp + 1);
 	}
 	else
 	{
 		// no waiting threads --> just increment sem value
 		//wrm_logd("sem=0x%p:  post:  no waiting threads.\n", sem);
 		sem->value++;
-		if (sem->mode == Wrm_sem_binary)
+		if (sem->mode & Wrm_sem_binary)
 			sem->value = 1;
 	}
+	if (sem->mode & Wrm_sem_binary)
+		sem->owner = thr;
 	wrm_spinlock_unlock(&sem->lock);
 
 	if (!thr.is_nil())

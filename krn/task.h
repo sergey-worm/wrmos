@@ -11,21 +11,21 @@
 #include "kkip.h"
 #include "wlibc_assert.h"
 #include "arch_data.h"
+#include "bitmap.h"
 
 //--------------------------------------------------------------------------------------------------
 class Task_t
 {
 	static unsigned _counter;         // for set id
 
-	unsigned    _id;                  //
-	char        _name[8];             // space's name for debug
-	Aspace      _aspace;              // virtual address space
-	L4_fpage_t  _kip_area;            // KIP area for user address space
-	L4_fpage_t  _utcb_area;           // UTCBs area for user address space
-	L4_thrid_t  _redirector;          //
-	unsigned    _threads_max;         //
-	unsigned    _threads_act;         //
-	Arch_task_t _arch;                //
+	unsigned     _id;                  //
+	char         _name[8];             // space's name for debug
+	Aspace       _aspace;              // virtual address space
+	L4_fpage_t   _kip_area;            // KIP area for user address space
+	L4_fpage_t   _utcb_area;           // UTCBs area for user address space
+	bitmap_t<64> _utcbs_bitmap;        // bitmap with busy utcb
+	L4_thrid_t   _redirector;          //
+	Arch_task_t  _arch;                //
 
 public:
 
@@ -36,7 +36,7 @@ public:
 		return tsk;
 	}
 
-	explicit Task_t() : _id(_counter++), _aspace(_id), _threads_max(0), _threads_act(0)
+	explicit Task_t() : _id(_counter++), _aspace(_id)
 	{
 		_kip_area = L4_fpage_t::create_nil();
 		_utcb_area = L4_fpage_t::create_nil();
@@ -71,9 +71,6 @@ public:
 	unsigned id()       const { return _id;   }
 
 	inline L4_thrid_t redirector()   const { return _redirector;  }
-	inline unsigned threads_max()    const { return _threads_max; }
-	inline unsigned threads_active() const { return _threads_act; }
-
 	inline void redirector(L4_thrid_t r) { _redirector = r; }
 
 	void map(addr_t va, paddr_t pa, size_t sz, kacc_t acc, unsigned cachable)
@@ -102,7 +99,6 @@ public:
 		return _aspace.find_free_uspace(sz, align);
 	}
 
-
 private:
 
 	// used than first task's thread is starting
@@ -116,43 +112,53 @@ public:
 
 	inline void kip_area(L4_fpage_t fpage)
 	{
-		wassert(!_threads_act);
+		wassert(!_utcbs_bitmap.count());
 		wassert(!fpage.is_nil());
 		_kip_area  = fpage;
 	}
 
 	inline void utcb_area(L4_fpage_t fpage)
 	{
-		wassert(!_threads_act);
+		wassert(!_utcbs_bitmap.count());
 		_utcb_area = fpage;
-		_threads_max = fpage.size() / Cfg_page_sz;
+		_utcbs_bitmap.init(fpage.size() / Cfg_page_sz);
+		map_kip();
 	}
 
-	inline L4_fpage_t kip_area()  { return _kip_area;  }
+	inline L4_fpage_t kip_area()  { return _kip_area; }
 
-	// alloc utcb area for next thread
-	inline addr_t alloc_utcb_area()
+	// call then thread activated
+	inline addr_t alloc_utcb_uspace()
 	{
 		wassert(_utcb_area.addr() && _utcb_area.size());
-		return _threads_act < _threads_max  ?  _utcb_area.addr() + _threads_act * Cfg_page_sz  :  0;
+		int rc = _utcbs_bitmap.getfree();
+		return rc < 0  ?  0 : _utcb_area.addr() + rc * Cfg_page_sz;
 	}
 
-	inline bool is_able_to_activate_new_thread()
+	inline void free_utcb_uspace(addr_t utcb)
 	{
-		return _threads_max - _threads_act;
-	}
-
-	inline void thread_activated() // callback
-	{
-		if (!_threads_act)
-		{
-			// aspace should be already configured
-			wassert(_kip_area.addr() && _kip_area.size());
-			map_kip();
-		}
 		wassert(_utcb_area.addr() && _utcb_area.size());
-		wassert(_threads_act < _threads_max);
-		_threads_act++;
+		wassert(utcb >= _utcb_area.addr());
+		unsigned pos = (utcb - _utcb_area.addr()) / Cfg_page_sz;
+		int rc = _utcbs_bitmap.clear(pos);
+		wassert(!rc);
+		if (rc)
+			force_printk("ERROR:  _utcbs_bitmap.getfree(%u) - rc=%d.\n", pos, rc);
+	}
+
+	inline bool is_empty() const
+	{
+		return !_utcbs_bitmap.count();
+	}
+
+	inline bool is_full() const
+	{
+		return _utcbs_bitmap.count() == _utcbs_bitmap.capacity();
+	}
+
+	inline bool active_threads() const
+	{
+		return _utcbs_bitmap.count();  // bitmap contents active threads only
 	}
 
 	inline addr_t user_kip()
@@ -226,6 +232,19 @@ public:
 	{
 		Task_t& tsk = _tasks.push_back();
 		return tsk;
+	}
+
+	static void remove(Task_t* tsk)
+	{
+		for (tasks_t::iter_t it=_tasks.begin(); it!=_tasks.end(); ++it)
+		{
+			if (tsk == &*it)
+			{
+				_tasks.erase(it);
+				return;
+			}
+		}
+		panic("%s:  Attempt to remove alien task=0x%p.", __func__, tsk);
 	}
 };
 

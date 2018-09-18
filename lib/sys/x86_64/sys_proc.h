@@ -70,6 +70,8 @@ public:
 	static inline uint32_t fs()  { uint32_t v; asm volatile("mov %%fs, %0"  : "=r"(v)); return v; }
 	static inline uint32_t gs()  { uint32_t v; asm volatile("mov %%gs, %0"  : "=r"(v)); return v; }
 
+	static inline void fs(uint32_t v) {  asm volatile("mov %0, %%fs" :: "r"(v));  }
+
 	static inline uint32_t eflags() { uint32_t v; asm volatile("pushf; pop %0" : "=r"(v)); return v; }
 	static inline uint32_t eip()    { uint32_t v; asm volatile("call 1f; 1: pop %0" : "=r"(v)); return v; }
 
@@ -97,6 +99,9 @@ public:
 	static inline void wmb()        { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
 	static inline void wait_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
 	static inline void send_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+
+	static inline void tls(word_t v) { /*fs(v);*/ (void)v; }
+	static inline word_t tls() { return 0/*fs()*/; }
 
 	static inline void dcache_flush()
 	{

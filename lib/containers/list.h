@@ -139,7 +139,7 @@ class list_t
 			else
 			if (where == Next)
 			{
-				if (pos->next) 
+				if (pos->next)
 					pos->next->prev = item;
 				item->next = pos->next;
 				pos->next = item;
@@ -150,7 +150,7 @@ class list_t
 			else
 			if (where == Prev)
 			{
-				if (pos->prev) 
+				if (pos->prev)
 					pos->prev->next = item;
 				item->prev = pos->prev;
 				pos->prev = item;
@@ -185,7 +185,7 @@ class list_t
 
 	// data
 	list_dprint_t dprint;
-	const char* name;
+	const char*   name;
 	list_malloc_t malloc_func;
 	Xlist busy;
 	Xlist free;
@@ -198,9 +198,11 @@ private:
 		print("  List::%p::%s:  items=%zu, itemsz=%zu, base=0x%p, sz=%zu.\n",
 			this, __func__, sz / sizeof(Item), sizeof(Item), base, sz);
 
+		/* DELME after 01.01.2019
 		// address must be alligned to 8 byte, cause type 'T' may contain
 		// 64-bit data and access to them may be through double instructions
 		wassert(!((addr_t)base & (sizeof(uint64_t) - 1)));
+		*/
 
 		addr_t addr = (addr_t)base;
 		size_t rest = sz;
@@ -250,11 +252,13 @@ public:
 
 	class iter_t
 	{
-		friend class list_t<T,N>; // to allow access to 'item'
+		friend class list_t<T,N>; // to allow access to private 'item' members
 		Item* item;
 	public:
 		iter_t () : item(0) {}
 		iter_t (Item* p) : item(p) {}
+		void raw(void* p) { item = (Item*)p; }
+		void* raw() { return item; }
 		inline iter_t& operator ++ () { item = item->next;  return *this; }
 		inline iter_t& operator -- () { item = item->prev;  return *this; }
 		inline T& operator * () { return item->data; }
@@ -285,6 +289,7 @@ public:
 		Item* item;
 	public:
 		citer_t (Item* p) { item = p; }
+		const void* raw() const { return item; }
 		inline citer_t& operator ++ () { item = item->next;  return *this; }
 		inline citer_t& operator -- () { item = item->prev;  return *this; }
 		inline const T& operator * () { return item->data; }
@@ -303,55 +308,43 @@ public:
 		inline citer_t operator - (int v) { return operator + (-v); }
 	};
 
-	list_t(list_dprint_t dbg_print = List_no_dprint, const char* n = 0) :
-		dprint(dbg_print), name(n), malloc_func(0)
-	{
-		print("  List::%p::%s:  hello.\n", this, __func__);
-		add_mem(local_buf, sizeof(local_buf));
-		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
-	}
-
-	list_t(void* mem, size_t sz, list_dprint_t dbg_print = List_no_dprint) :
-		dprint(dbg_print), malloc_func(0)
-	{
-		print("  List::%p::%s:  hello, mem=0x%x, sz=%zu.\n", this, __func__, mem, sz);
-		add_mem(local_buf, sizeof(local_buf));
-		add_mem(mem, sz);
-	}
-
 private:
 
-	// XXX:  wa
-	void init(list_dprint_t dbg_print = List_no_dprint)
+	void init(list_dprint_t dbg_print = List_no_dprint, const char* n = 0)
 	{
 		print("  List::%p::%s:  before:  free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
-
 		dprint = dbg_print;
+		name = n;
 		malloc_func = 0;
 		add_mem(local_buf, sizeof(local_buf));
-
 		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
 	}
 
 public:
 
+	list_t(list_dprint_t dbg_print = List_no_dprint, const char* n = 0)
+	{
+		dprint = dbg_print;
+		print("  List::%p::%s:  hello.\n", this, __func__);
+		init(dbg_print, n);
+		print("  List::%p::%s:  after:   free.sz=%zu, busy.sz=%zu.\n", this, __func__, free.sz, busy.sz);
+	}
+
+	list_t(void* mem, size_t sz, list_dprint_t dbg_print = List_no_dprint, const char* n = 0)
+	{
+		dprint = dbg_print;
+		print("  List::%p::%s:  hello, mem=0x%x, sz=%zu.\n", this, __func__, mem, sz);
+		init(dbg_print, n);
+		add_mem(mem, sz);
+	}
+
 	~list_t()
 	{
 		print("  List::%p::%s:  local_buf=0x%p.\n", this, __func__, local_buf);
 		if ((free.sz + busy.sz) != N)
-			panic("  List::%p::%s:  unsupported dtor() for allocated list:  name=%s, free=%zu, busy=%zu, N=%zu, typesz=%zu, base_file=%s.\n",
+			panic("  List::%p::%s:  unsupported dtor() for allocated list:  name=%s, free=%zu,"
+				" busy=%zu, N=%zu, typesz=%zu, base_file=%s.\n",
 				this, __func__, name?name:"---", free.sz, busy.sz, N, sizeof(T), __BASE_FILE__);
-
-	}
-
-	void set_allocator(list_malloc_t new_malloc)
-	{
-		malloc_func = new_malloc;
-	}
-
-	void add_memory(void* mem, size_t sz)
-	{
-		add_mem(mem, sz);
 	}
 
 	list_t& operator = (const list_t& right)
@@ -370,6 +363,29 @@ public:
 		return *this;
 	}
 
+
+	void set_allocator(list_malloc_t new_malloc)
+	{
+		malloc_func = new_malloc;
+	}
+
+	void add_memory(void* mem, size_t sz)
+	{
+		add_mem(mem, sz);
+	}
+
+	void add_free_item(void* p)
+	{
+		add_mem(p, sizeof(Item));
+	}
+
+	void* del_free_item()
+	{
+		Item* item = free.begin;
+		free.remove(item);
+		return item;
+	}
+
 	inline const citer_t begin()  const { return citer_t(busy.begin); }
 	inline const citer_t end()    const { return citer_t(0);          }
 	inline const citer_t cbegin() const { return citer_t(busy.begin); }
@@ -378,9 +394,10 @@ public:
 	inline iter_t begin()    { return iter_t(busy.begin); }
 	inline iter_t last()     { return iter_t(busy.last);  }
 	inline iter_t end()      { return iter_t(0);          }
-	inline size_t size()     const { return busy.sz;            }
-	inline size_t capacity() const { return busy.sz + free.sz;  }
-	inline bool   empty()    const { return !busy.sz;           }
+	inline size_t size()      const { return busy.sz;            }
+	inline size_t free_size() const { return free.sz;            }
+	inline size_t capacity()  const { return busy.sz + free.sz;  }
+	inline bool   empty()     const { return !busy.sz;           }
 
 	// dbg:  check correctness
 	void check(const char* lable)
@@ -507,5 +524,7 @@ public:
 	const T& front() const {  wassert(busy.sz);  return busy.begin->data;  }
 	const T& back()  const {  wassert(busy.sz);  return busy.last->data;   }
 };
+
+#undef print
 
 #endif // LIST_H

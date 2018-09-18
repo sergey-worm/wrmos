@@ -16,10 +16,11 @@ enum
 	Wrm_ipc_get_usual_mem    =  4,
 	Wrm_ipc_get_named_mem    =  5,
 	Wrm_ipc_create_thread    =  6,
-	Wrm_ipc_create_task      =  7,
-	Wrm_ipc_register_thread  =  8,
-	Wrm_ipc_get_thread_id    =  9,
-	Wrm_ipc_app_threads      = 10
+	Wrm_ipc_delete_thread    =  7,
+	Wrm_ipc_create_task      =  8,
+	Wrm_ipc_register_thread  =  9,
+	Wrm_ipc_get_thread_id    = 10,
+	Wrm_ipc_app_threads      = 11
 };
 
 #endif // WRM_LABELS

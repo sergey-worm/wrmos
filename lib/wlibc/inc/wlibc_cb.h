@@ -19,16 +19,20 @@ typedef void  (*wlibc_out_string_t)(const char* str, size_t len);
 typedef int   (*wlibc_in_char_t)(void);
 typedef int   (*wlibc_in_string_t)(char* buf, size_t len);
 typedef void* (*wlibc_malloc_t)(size_t sz);
+typedef int   (*wlibc_malloc_empty_t)(size_t sz);
+typedef void  (*wlibc_free_t)(void* p);
 typedef void  (*wlibc_break_exec_t)(const char* str) __attribute__((noreturn));
 
 typedef struct
 {
-	wlibc_out_char_t    out_char;
-	wlibc_out_string_t  out_string;
-	wlibc_in_char_t     in_char;
-	wlibc_in_string_t   in_string;
-	wlibc_malloc_t      malloc;
-	wlibc_break_exec_t  break_exec;
+	wlibc_out_char_t     out_char;
+	wlibc_out_string_t   out_string;
+	wlibc_in_char_t      in_char;
+	wlibc_in_string_t    in_string;
+	wlibc_malloc_t       malloc;
+	wlibc_malloc_empty_t malloc_empty;
+	wlibc_free_t         free;
+	wlibc_break_exec_t   break_exec;
 } Wlibc_callbacks_t;
 
 Wlibc_callbacks_t* wlibc_callbacks_get(void);

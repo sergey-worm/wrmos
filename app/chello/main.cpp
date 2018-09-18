@@ -61,11 +61,5 @@ int main(int argc, const char* argv[])
 		wrm_loge("w4console_close() - rc=%d.\n", rc);
 
 	printf("%s:  bye-bye.\n", argv[0]);
-
-	while (1)
-	{
-		usleep(10*1000*1000);
-	}
-
 	return 0;
 }

@@ -11,6 +11,10 @@
 #include "libcio.h"
 #include "sys_proc.h"
 
+#undef __cplusplus // allow uClibc use table implementation of ctype
+#include <ctype.h>
+#define __cplusplus
+
 extern "C" unsigned long int strtoul(const char* str, char** endptr, int base);
 
 
@@ -150,18 +154,25 @@ static int cmd_show_memory(unsigned argc, char** argv)
 
 	// read line by line, each line contents 4 long values
 
-	addr_t start = round_down(addr, 4*sizeof(long));
-	addr_t end = round_up(addr + size, 4*sizeof(long));
+	enum { Line_sz = 4 * sizeof(long) };
+	addr_t start = round_down(addr, Line_sz);
+	addr_t end = round_up(addr + size, Line_sz);
 
-	for (addr_t a=start; a<end; a+=4*sizeof(long))
+	for (addr_t a=start; a<end; a+=Line_sz)
 	{
+		char chars[Line_sz + 1];
+		for (unsigned i=0; i<Line_sz; ++i)
+			chars[i] = isprint(*(char*)(a+i)) ? *(char*)(a+i) : '.';
+		chars[Line_sz] = '\0';
+
 		unsigned width = 2*sizeof(long);
-		printf("  0x%0*lx:  %0*lx %0*lx %0*lx %0*lx\n",
+		printf("  0x%0*lx:  %0*lx %0*lx %0*lx %0*lx  %s\n",
 			width, a,
 			width, *(long*)(a + 0*sizeof(long)),
 			width, *(long*)(a + 1*sizeof(long)),
 			width, *(long*)(a + 2*sizeof(long)),
-			width, *(long*)(a + 3*sizeof(long)));
+			width, *(long*)(a + 3*sizeof(long)),
+			chars);
 	}
 
 	printf("\n");
@@ -173,6 +184,57 @@ static int cmd_show_mapping(unsigned argc, char** argv)
 	unsigned thread_no = argc==2 ? strtoul(argv[1], NULL, 0) : 0;
 	Thread_t* thr = thread_no ? Threads_t::find(thread_no) : Sched_t::current();
 	thr->task()->dump();
+	return 0;
+}
+
+static int cmd_switch_thread(unsigned argc, char** argv)
+{
+	if (argc != 2)
+	{
+		printf("Use:  switch_thread <thrid>\n");
+		return 0;
+	}
+
+	unsigned thread_no = strtoul(argv[1], NULL, 0);
+	if (!thread_no)
+	{
+		printf("Wrong thread id.\n");
+		return 0;
+	}
+
+	Thread_t* thr = Threads_t::find(thread_no);
+	if (!thread_no)
+	{
+		printf("Can not find thread with such id=%u.\n", thread_no);
+		return 0;
+	}
+	Sched_t::switch_to(thr);
+	return 0;
+}
+
+static int cmd_switch_task(unsigned argc, char** argv)
+{
+	if (argc != 2)
+	{
+		printf("Use:  switch_task <thrid>\n");
+		return 0;
+	}
+
+	unsigned thread_no = strtoul(argv[1], NULL, 0);
+	if (!thread_no)
+	{
+		printf("Wrong thread id.\n");
+		return 0;
+	}
+
+	Thread_t* thr = Threads_t::find(thread_no);
+	if (!thread_no)
+	{
+		printf("Can not find thread with such id=%u.\n", thread_no);
+		return 0;
+	}
+	printf("Switch to thread=%u, task=%u.\n", thread_no, thr->task()->id());
+	thr->task()->set_current();
 	return 0;
 }
 
@@ -188,6 +250,8 @@ void Kdb::init()
 	_shell.add_cmd("banner",        cmd_banner);
 	_shell.add_cmd("mem",           cmd_show_memory);
 	_shell.add_cmd("mapping",       cmd_show_mapping);
+	_shell.add_cmd("switch_thread", cmd_switch_thread);
+	_shell.add_cmd("switch_task",   cmd_switch_task);
 
 	_shell.prompt("\x1b[1;33mkdb> \x1b[0m");
 }

@@ -5,7 +5,7 @@
 ####################################################################################################▫
 
 objs      := shell.o
-incflags  := -I$(wrmdir)/lib/list
+incflags  := -I$(wrmdir)/lib/containers
 incflags  += -I$(wrmdir)/lib/sys
 incflags  += -I$(wrmdir)/lib/wlibc/inc
 baseflags := -O2 -Wall -Werror

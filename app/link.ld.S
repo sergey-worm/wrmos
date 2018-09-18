@@ -56,6 +56,7 @@ SECTIONS
 		_rodata_start = .;
 		*(.rodata)
 		*(.rodata.*)
+		*(.gcc_except_table*)
 		_rodata_end = .;
 		. = ALIGN(page_sz);
 	} > vspace
@@ -65,9 +66,26 @@ SECTIONS
 		_data_start = .;
 		*(.data)
 		*(.data.*)
-		*(.got)               /* .got needs for libgcc */
-		_data_end = .;
-		. = ALIGN(page_sz);
+		*(.got*)               /* .got needs for libgcc */
+		/*. = ALIGN(page_sz);*/
+	} > vspace
+
+	.tdata :
+	{
+		_tls_start = .;
+		_tdata_start = .;
+		*(.tdata*)
+		_tdata_end = .;
+		/*. = ALIGN(page_sz);*/
+	} > vspace
+
+	.tbss :
+	{
+		_tbss_start = .;
+		*(.tbss*)
+		_tbss_end = .;
+		_tls_end = .;
+		/*. = ALIGN(page_sz);*/
 	} > vspace
 
 	.bss :
@@ -77,7 +95,7 @@ SECTIONS
 		*(.bss.*)
 		*(.gnu.linkonce*)
 		_bss_end = .;
-		. = ALIGN(page_sz);
+		/*. = ALIGN(page_sz);*/
 	} > vspace
 
 	/* not needed sections */
@@ -91,5 +109,6 @@ SECTIONS
 		*(.debug*)
 		*(.ARM.extab*)     /* arm */
 		*(.ARM.exidx*)     /* arm */
+		*(.gnu.attributes)
 	}
 }

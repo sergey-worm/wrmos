@@ -4,8 +4,9 @@
 #
 ####################################################################################################
 
-files     := string.o ctype.o stdio.o assert.o panic.o tests.o
-files     += errno.o stdlib.o unistd.o wlibc_cb.o
+files     := string.o ctype.o stdio.o assert.o panic.o tests.o time.o poll.o ioctl.o uio.o
+files     += errno.o stdlib.o unistd.o wchar.o wctype.o locale.o link.o isnan.o fixme_c++.o
+files     += wlibc_cb.o
 files     += fixme.o
 files     += # libm.o  # use libm instead
 objs      := $(addprefix src/,$(files))

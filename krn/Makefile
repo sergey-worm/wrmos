@@ -49,7 +49,7 @@ use_libs   += sys/libsys.a
 use_libs   += shell/libshell.a
 
 #------------------------------
-#  prepare params for base.bk  
+#  prepare params for base.mk
 #------------------------------
 
 objs        := $(arch)/crt0.o
@@ -72,11 +72,10 @@ incflags    += -I$(cfgdir)
 incflags    += -I$(arch)
 incflags    += -I$(wrmdir)/lib/sys/$(arch)
 incflags    += -I$(wrmdir)/lib/sys
-incflags    += -I$(wrmdir)/lib/list
+incflags    += -I$(wrmdir)/lib/containers
 incflags    += -I$(wrmdir)/lib/l4/inc
 incflags    += -I$(wrmdir)/lib/wlibc/inc
 incflags    += -I$(wrmdir)/lib/shell
-incflags    += -I$(wrmdir)/lib/cbuf
 incflags    += -I$(wrmdir)/lib/uart/$(uart)
 incflags    += -I$(wrmdir)/lib/timer/$(timer)
 incflags    += -I$(wrmdir)/lib/intc/$(intc)

@@ -203,14 +203,14 @@ __attribute__((noinline)) static word_t do_exreg(word_t dest, word_t ctrl, word_
 	register word_t     o4 asm ("%o4") = *pager;
 	register word_t     o5 asm ("%o5") = *udhnd;
 	register word_t     g4 asm ("%g4") = *flags;
-	register word_t     g7 asm ("%g7") = *(ip+1);
+	register word_t     g5 asm ("%g5") = *(ip+1);
 	register word_t     g1 asm ("%g1") = L4_syscall_exchange_registers;
 	(void)g1; (void)o1;
 	do_syscall();
 	word_t result(o0);
 	*sp     = o2;
 	*ip     = o3;
-	*(ip+1) = g7;
+	*(ip+1) = g5;
 	*flags  = g4;
 	*pager  = o4;
 	*udhnd  = o5;

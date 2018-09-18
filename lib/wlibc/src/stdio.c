@@ -12,10 +12,14 @@
 #include <wchar.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <assert.h>
 #include "wlibc_cb.h"
+#include "wlibc_panic.h"
 
 FILE* stdin = 0;
 FILE* stdout = 0;
+FILE* stderr = 0;
 
 enum Flags
 {
@@ -107,6 +111,13 @@ static inline unsigned add_chars(char* buf, unsigned sz, unsigned buf_ptr, char 
 {
 	for (int i=0; i<count; ++i)
 		buf_ptr += add_char(buf, sz, buf_ptr, ch);
+	return count;
+}
+
+static inline unsigned add_str(char* buf, unsigned sz, unsigned buf_ptr, const char* str, unsigned count)
+{
+	for (int i=0; i<count; ++i)
+		buf_ptr += add_char(buf, sz, buf_ptr, str[i]);
 	return count;
 }
 
@@ -213,6 +224,259 @@ static inline int snprint_int64(char* buf, size_t sz, int64_t val, const Spec_t*
 	return snprint_64bit_int(buf, sz, val<0?-val:val, spec, base, val>=0);
 }
 
+int wlibc_isnan(double x);
+int wlibc_isinf(double x);
+
+int __tolower(int c)
+{
+	if (c >= 'A'  &&  c <= 'Z')
+		return c - 'A' + 'a';
+	else
+		return c;
+}
+
+static int snprint_float(char* buf, size_t sz, double val, const Spec_t* spec, int for_g)
+{
+	// PREPARATION
+
+	// format:  sign|integer|fraction
+	//          fraction may be:
+	//            - scientific notation (mantissa/exponent) - 3.9265e+2
+	//            - decimal float point                     - 392.65
+
+	enum
+	{
+		Max_int          = 40,
+		Max_frac         = 40,
+		Max_exp          = 5,
+		Default_prec     = 6,
+		Default_prec_alt = 5
+	};
+
+	unsigned buf_ptr = 0;
+
+	// check for negative
+	int neg = 0;
+	if (val < 0.0)
+	{
+		neg = 1;
+		val *= -1.0;
+	}
+
+	// check for uppercase
+	int upper = isupper(spec->specifier);
+	char specc = __tolower(spec->specifier);  // TODO: use tolower()
+
+	assert(specc=='f' || specc=='e' || specc=='a');  // %g was transformed at %e or %e
+
+	// check for NAN
+	if (wlibc_isnan(val))
+	{
+		int tot = neg + 3;
+		if (spec->present & Width_present  &&  spec->width > tot)
+			buf_ptr += add_chars(buf, sz, buf_ptr, ' ', spec->width - tot);
+		if (neg)
+			buf_ptr += add_char(buf, sz, buf_ptr, '-');
+		buf_ptr += add_str(buf, sz, buf_ptr, upper ? "NAN" : "nan", 3);
+		return buf_ptr;
+	}
+
+	// check for infinity
+	if (wlibc_isinf(val))
+	{
+		int tot = neg + 3;
+		if (spec->present & Width_present  &&  spec->width > tot)
+			buf_ptr += add_chars(buf, sz, buf_ptr, ' ', spec->width - tot);
+		if (neg)
+			buf_ptr += add_char(buf, sz, buf_ptr, '-');
+		buf_ptr += add_str(buf, sz, buf_ptr, upper ? "INF" : "inf", 3);
+		return buf_ptr;
+	}
+
+	if (specc == 'a')
+	{
+		// TODO:  support hex float format
+		specc = 'e';
+	}
+
+	// do simple normalization:  x.xxxx + exp
+	int exp = 0;
+	if (val != 0.0)
+	{
+		for (; val>=10; val/=10, exp++);
+		for (; val<1.0;    val*=10, exp--);
+	}
+
+	// prepare integer part
+	int int_len = 0;
+	char int_str[Max_int];
+	// format with exponent
+	if (specc == 'e')
+	{
+		int i = (int) val;
+		int_str[int_len++] = i + '0';
+		val -= (double)i;
+		val *= 10;
+	}
+	// format without exponent
+	else if (exp > (int)sizeof(int_str)-1)
+	{
+		buf_ptr += add_str(buf, sz, buf_ptr, "OVERFLOW", 8);
+		return buf_ptr;
+	}
+	else if (exp < 0)
+	{
+		int_str[int_len++] = '0';
+	}
+	else
+	{
+		// denormalize decimal float point format
+		do
+		{
+			int i = (int) val;
+			int_str[int_len++] = i + '0';
+			val -= (double)i;
+			val *= 10;
+		} while (exp--);
+	}
+
+	// prepare fraction part
+	int prec = -1;
+	if (spec->present & Precision_present)
+		prec = spec->precision;
+	if (prec > Max_frac) prec = Max_frac;
+	if (prec < 0)        prec = spec->present & Alternate ? Default_prec_alt : Default_prec;
+
+	char frac_str [Max_frac + Max_exp];
+	unsigned frac_len = 0;
+
+	int round = 1;
+	if (specc == 'f')  // format without exponent
+	{
+		for (; frac_len<prec && exp<-1; frac_len++, exp++)
+			frac_str[frac_len] = '0';
+
+		if (exp < -1)  // don't round off if we ran out of space
+			round = 0;
+	}
+
+	for (; frac_len<prec; frac_len++)
+	{
+		int i = (int) val;
+		frac_str[frac_len] = i + '0';
+		val -= i;
+		val *= 10;
+	}
+
+	// round off last digit
+	if (round && val >= 5.0)
+	{
+		int i;
+		for (i=frac_len-1; frac_str[i]=='9' && i>=0; --i)
+			frac_str[i] = '0';
+
+		if (i >= 0)
+		{
+			frac_str[i]++;
+		}
+		else
+		{
+			for (i=int_len-1; int_str[i]=='9' && i>=0 ; i--)
+				int_str[i] = '0';
+
+			if (i >= 0)
+			{
+				int_str[i]++;
+			}
+			else
+			{
+				for (i=int_len++; i>0; i--)
+					int_str[i] = int_str[i-1];
+				int_str[0] = '1';
+			}
+		}
+	}
+
+	if (for_g  &&  !(spec->flags & Alternate))
+	{
+		// discard nulls at the end of fraction part
+		for (int i=frac_len-1; frac_str[i]=='0' && i>=0; --i)
+			--frac_len;
+	}
+
+	// add exponent
+	if (specc == 'e') // format with exponent
+	{
+		frac_str[frac_len++] = upper ? 'E' : 'e';
+		if (exp < 0)
+		{
+			frac_str[frac_len++] = '-';
+			exp *= -1;
+		}
+		else
+		{
+			frac_str[frac_len++] = '+';
+		}
+		// TODO:  to optimize may use for() instead of snprint_uint64()
+		Spec_t exp_spec = { .width = 2, .flags = Null_pad }; // exponent always contains at least two digits
+		frac_len += snprint_uint64(frac_str + frac_len, sizeof(frac_str) - frac_len, exp, &exp_spec, 10);
+	}
+
+	// prepare sign
+	char sign = 0; // vals:  no_sign(0), ' ', '+', '-'
+	if (neg)
+	{
+		sign = '-';
+	}
+	else // negative
+	{
+		if (spec->flags & Space_instead_plus)
+			sign = ' ';
+		if (spec->flags & Force_sign)
+			sign = '+';
+	}
+	int sign_len = !!sign;
+
+	// check for decimal point
+	int point_len = (prec  ||  spec->flags & Alternate) ? 1 : 0;
+
+	// prepare padding
+	int pad_len = 0;
+	int width = 0;
+	if (spec->present & Width_present)
+		width = spec->width;
+	if ((spec->flags & Null_pad)  &&  !(spec->flags & Align_left))
+	{
+		pad_len = width - (sign_len +    frac_len + point_len + int_len);
+		if (pad_len < 0)
+			pad_len = 0;
+	}
+
+	// OUTPUT
+
+	int tot = sign_len + frac_len + point_len + int_len + pad_len;
+
+	if (!(spec->flags & Align_left)  &&  width > tot)
+		buf_ptr += add_chars(buf, sz, buf_ptr, ' ', width - tot);
+
+	if (sign)
+		buf_ptr += add_char(buf, sz, buf_ptr, sign);
+
+	buf_ptr += add_chars(buf, sz, buf_ptr, '0', pad_len);
+
+	buf_ptr += add_str(buf, sz, buf_ptr, int_str, int_len);
+
+	if (point_len  &&  !(for_g && (!frac_len || frac_str[0]=='e' || frac_str[0]=='E')))
+		buf_ptr += add_char(buf, sz, buf_ptr, '.');
+
+	buf_ptr += add_str(buf, sz, buf_ptr, frac_str, frac_len);
+
+	if (spec->flags & Align_left  &&  width > tot)
+		buf_ptr += add_chars(buf, sz, buf_ptr, ' ', width - tot);
+
+	return buf_ptr;
+}
+
 static int snprint_char(char* buf, size_t sz, int ch, const Spec_t* spec)
 {
 	unsigned buf_ptr = 0;
@@ -267,7 +531,42 @@ static int snprint_str(char* buf, size_t sz, const char* str, const Spec_t* spec
 
 static int snprint_wstr(char* buf, size_t sz, const wchar_t* wstr, const Spec_t* spec)
 {
-	return -1; // unsupported yet
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+// noinline function to work with floats, to prevent using FPU registers in vsnprint_float()
+__attribute__((noinline))
+static int vsnprint_float(char* buf, size_t sz, const va_list* args, const Spec_t* spec)
+{
+	int res = 0;
+	double val = 0;
+	switch (spec->length)
+	{
+		case Length_none:  val = va_arg(*args, double);       break;
+		//case Length_L:   val = va_arg(*args, long double);  break;  // unsupported
+		default:
+			return -1;  // unexpected length
+	}
+	if (spec->specifier == 'g'  ||  spec->specifier == 'G')
+	{
+		// dry ryn to determine the shortest representation: %e or %f
+		Spec_t s;
+		memcpy(&s, spec, sizeof(s));
+		s.present |= Length_present;
+		s.length = 0;
+		s.specifier = 'f';
+		int len_f = snprint_float(NULL, 0, val, &s, 1);
+		s.specifier = 'e';
+		int len_e = snprint_float(NULL, 0, val, &s, 1);
+		s.specifier = (len_f < len_e) ? (spec->specifier - 'g' + 'f' ) : (spec->specifier - 'g' + 'e' );
+		res = snprint_float(buf, sz, val, &s, 1);
+	}
+	else
+	{
+		res = snprint_float(buf, sz, val, spec, 0);
+	}
+	return res;
 }
 
 static int vsnprint_spec(char* buf, size_t sz, const va_list* args, unsigned written, const Spec_t* spec)
@@ -328,12 +627,43 @@ static int vsnprint_spec(char* buf, size_t sz, const va_list* args, unsigned wri
 		case 'F':
 		case 'e':
 		case 'E':
-		case 'g':
-		case 'G':
+		case 'g':  // shortest representation: %e or %f
+		case 'G':  // shortest representation: %E or %F
 		case 'a':
 		case 'A':
-			return -1;  // unsupported yet
-
+		{
+			#if 0
+			double val = 0;
+			switch (spec->length)
+			{
+				case Length_none:  val = va_arg(*args, double);       break;
+				//case Length_L:   val = va_arg(*args, long double);  break;  // unsupported
+				default:
+					return -1;  // unexpected length
+			}
+			if (spec->specifier == 'g'  ||  spec->specifier == 'G')
+			{
+				// dry ryn to determine the shortest representation: %e or %f
+				Spec_t s;
+				memcpy(&s, spec, sizeof(s));
+				s.present |= Length_present;
+				s.length = 0;
+				s.specifier = 'f';
+				int len_f = snprint_float(NULL, 0, val, &s, 1);
+				s.specifier = 'e';
+				int len_e = snprint_float(NULL, 0, val, &s, 1);
+				s.specifier = (len_f < len_e) ? (spec->specifier - 'g' + 'f' ) : (spec->specifier - 'g' + 'e' );
+				res = snprint_float(buf, sz, val, &s, 1);
+			}
+			else
+			{
+				res = snprint_float(buf, sz, val, spec, 0);
+			}
+			#else
+			res = vsnprint_float(buf, sz, args, spec);
+			#endif
+			break;
+		}
 		case 'c':
 		{
 			int val = 0;
@@ -598,13 +928,21 @@ int vsnprintf(char* buf, size_t sz, const char* format, va_list args)
 	// set string termination
 	if (sz)
 	{
-		if (buf_ptr < 0)         // error
+		if ((int)buf_ptr < 0)    // error
 			buf[0] = '\0';
 		else if (buf_ptr < sz)   // normal
 			buf[buf_ptr] = '\0';
 		else                     // overflow
 			buf[sz-1] = '\0';
 	}
+
+	/**/
+	if ((int)buf_ptr < 0)
+	{
+		printf("WRN:  %s:  res=%d.\n", __func__, buf_ptr);
+		buf_ptr = 0;
+	}
+	/*~*/
 
 	return buf_ptr;
 }
@@ -897,20 +1235,6 @@ int vsscanf(const char* str, const char* format, va_list args)
 			}
 		}
 	}
-
-	/*
-	// set string termination
-	if (sz)
-	{
-		if (buf_ptr < 0)         // error
-			buf[0] = '\0';
-		else if (buf_ptr < sz)   // normal
-			buf[buf_ptr] = '\0';
-		else                     // overflow
-			buf[sz-1] = '\0';
-	}
-	*/
-
 	return scanned_cnt;
 }
 
@@ -1045,6 +1369,12 @@ int fputc(int c, FILE* stream)
 	return c;
 }
 
+int fputs(const char* str, FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
 #undef putchar // stdio.h did some macro
 int putchar(int c)
 {
@@ -1063,4 +1393,100 @@ int fflush(FILE* stream)
 	// nothing, output is not buffered
 	return 0;
 }
+
+int fileno(FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+int fclose(FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+size_t fread(void* ptr, size_t size, size_t count, FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream)
+{
+	//printf("%s:  sz=%zu, cnt=%zu, stream=%p:  '%.*s'.\n", __func__, size, count, stream, (int)(size*count), (char*)ptr);
+	printf("%s:  %.*s", __func__, (int)(size*count), (char*)ptr);
+	return size * count;
+}
+
+FILE* fopen64(const char* filename, const char* opentype)
+{
+	printf("%s:  filename=%s!\n", __func__, filename);
+	//panic("%s:  implement me - filename=%s!\n", __func__, filename);
+	return 0;
+}
+
+__off64_t ftello64(FILE *stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+int fseeko64(FILE* stream, __off64_t offset, int whence)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+__off64_t lseek64(int fd, __off64_t offset, int whence)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+#undef getc // stdio.h did some macro
+int getc(FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+#undef putc // stdio.h did some macro
+int putc(int character, FILE* stream)
+{
+	//printf("%s:  stream=%p:  c='%c'.\n", __func__, stream, character);
+	printf("%c", character);
+	return 0;
+}
+
+int ungetc(int character, FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+int setvbuf(FILE* stream, char* buffer, int mode, size_t size)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+FILE* fopen(const char* path, const char* mode)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+FILE* fdopen(int fd, const char* mode)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+FILE* freopen(const char* path, const char* mode, FILE* stream)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
 

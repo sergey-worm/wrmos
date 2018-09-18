@@ -2573,22 +2573,22 @@ int main(int argc, const char* argv[])
 	(void) ip_iface;
 
 	// create Eth thread
-	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	L4_fpage_t stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	L4_fpage_t utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp.addr(), eth_thread, 0, stack_fp.addr(), stack_fp.size(),
-	                      255, "ip-e", Wrm_thr_flag_no, &net_stack.ip_eth);
+	rc = wrm_thr_create(utcb_fp.addr(), eth_thread, 0, stack_fp.addr(), stack_fp.size(),
+	                    255, "ip-e", Wrm_thr_flag_no, &net_stack.ip_eth);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, net_stack.ip_eth.number());
 	assert(!rc && "failed to create Eth thread");
 
 	// create Client thread
-	stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp.addr(), client_thread, 0, stack_fp.addr(), stack_fp.size(),
-	                      255, "ip-c", Wrm_thr_flag_no, &net_stack.ip_client);
+	rc = wrm_thr_create(utcb_fp.addr(), client_thread, 0, stack_fp.addr(), stack_fp.size(),
+	                    255, "ip-c", Wrm_thr_flag_no, &net_stack.ip_client);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, net_stack.ip_client.number());
 	assert(!rc && "failed to create Client thread");
 

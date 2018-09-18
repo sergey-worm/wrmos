@@ -1,223 +1,146 @@
 //##################################################################################################
 //
-//  Memory pool - contents flex pages and allow to store and allocate fpage.
+//  Memory pool - page and memory allocators.
 //
 //##################################################################################################
 
-#include "list.h"
-#include "wrm_mpool.h"
+#include "page_pool.h"
+#include "memory_pool.h"
 #include "wrm_mtx.h"
-#include "wrm_log.h"
-#include <assert.h>
 
-class Memory_pool_t
+//--------------------------------------------------------------------------------------------------
+//  Page pool - contents flex pages and allow to store and allocate fpage.
+//--------------------------------------------------------------------------------------------------
+
+// use singltone to allow use pool before ctors
+static Page_pool_t* pginst()
 {
-	enum
+	static Page_pool_t _page_pool;
+	return &_page_pool;
+}
+
+static Wrm_mtx_t _pgmtx = Wrm_mtx_initializer;
+
+extern "C" void wrm_pgpool_dump()
+{
+	int rc = wrm_mtx_lock(&_pgmtx);
+	if (rc)
 	{
-		Log2sz_min = 12,           // FIXME:  add this param to cfg
-		Log2sz_max = 31,
-		Sizes_num  = Log2sz_max - Log2sz_min
-	};
-	typedef list_t <L4_fpage_t, 32> fpages_t;
-	fpages_t _fpages [Sizes_num];
-	size_t _pool_sz_bytes;
-
-private:
-
-	// split big pages to smaller to get page with size = log2sz
-	bool split(size_t log2sz)
-	{
-		//wrm_logd("%s:  log2sz=%u.\n", __func__, log2sz);
-		if (log2sz < Log2sz_min  ||  log2sz > Log2sz_max)
-			return false;
-
-		fpages_t& pgs = _fpages[log2sz - Log2sz_min];
-
-		if (pgs.empty())
-			split(log2sz + 1);  // split recursively
-
-		if (pgs.empty())
-			return false;
-
-		fpages_t::iter_t it = pgs.begin();
-		L4_fpage_t pg1 = *it;
-		L4_fpage_t pg2 = pg1;
-		pgs.erase(it);
-		size_t new_sz = log2sz - 1;
-		pg1.log2sz(new_sz);
-		pg2.log2sz(new_sz);
-		pg2.addr(pg1.addr() + pg2.size());
-		_fpages[new_sz - Log2sz_min].push_back(pg1);
-		_fpages[new_sz - Log2sz_min].push_back(pg2);
-		return true;
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return;
 	}
+	pginst()->dump();
+	rc = wrm_mtx_unlock(&_pgmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+}
 
-	size_t log2sz(size_t sz_bytes)
+extern "C" void wrm_pgpool_add(L4_fpage_t fpage)
+{
+	int rc = wrm_mtx_lock(&_pgmtx);
+	if (rc)
 	{
-		//wrm_logd("%s:  sz_bytes=0x%x.\n", __func__, sz_bytes);
-		size_t log2sz = 0;
-		word_t bytes = sz_bytes;
-		while (!(bytes & 0x1))
-		{
-			bytes >>= 1;
-			log2sz += 1;
-		}
-
-		// checking
-		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u, before checking.\n", __func__, sz_bytes, log2sz);
-		if ((size_t)(1lu<<log2sz) != sz_bytes)
-			return 0;
-
-		//wrm_logd("%s:  sz_bytes=0x%x --> log2sz=%u.\n", __func__, sz_bytes, log2sz);
-		return log2sz;
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return;
 	}
+	pginst()->add(fpage);
+	rc = wrm_mtx_unlock(&_pgmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+}
 
-public:
-
-	static Memory_pool_t& inst() { static Memory_pool_t mpool;  return mpool; }
-
-	Memory_pool_t() : _pool_sz_bytes(0) {}
-
-	void dump()
+extern "C" L4_fpage_t wrm_pgpool_alloc(size_t sz)
+{
+	int rc = wrm_mtx_lock(&_pgmtx);
+	if (rc)
 	{
-		wrm_logd("Dump memory pool (%#zx bytes):\n", _pool_sz_bytes);
-		for (unsigned i=0; i<Sizes_num; ++i)
-		{
-			fpages_t& pgs = _fpages[i];
-			if (pgs.empty())
-				continue;
-			for (fpages_t::citer_t it=pgs.cbegin(); it!=pgs.cend(); ++it)
-				wrm_logd("    addr=%#8lx, size=%#8lx/%u, acc=%d\n",
-					it->addr(), it->size(), it->log2sz(), it->access());
-		}
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return L4_fpage_t::create_nil();
 	}
+	L4_fpage_t res = pginst()->alloc(sz);
+	rc = wrm_mtx_unlock(&_pgmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+	return res;
+}
 
-	void add(L4_fpage_t fpage)
-	{
-		assert(fpage.log2sz() >= Log2sz_min);
-		assert(fpage.log2sz() <= Log2sz_max);
-		_fpages[fpage.log2sz() - Log2sz_min].push_back(fpage);
-		_pool_sz_bytes += fpage.size();
-	}
-
-	L4_fpage_t alloc_log2sz(size_t log2sz)
-	{
-		//wrm_logd("%s:  log2sz=%zu, pool_sz=0x%zx (&pool_sz=0x%p).\n", __func__, log2sz, _pool_sz_bytes, &_pool_sz_bytes);
-		if (log2sz < Log2sz_min  ||  log2sz > Log2sz_max)
-		{
-			wrm_loge("%s:  wrong log2sz=%zu.\n", __func__, log2sz);
-			return L4_fpage_t::create_nil();
-		}
-
-		if (_pool_sz_bytes < (size_t)(1<<log2sz))
-		{
-			wrm_logw("%s:  no mem:  pool_sz=0x%zx, require=0x%x.\n", __func__, _pool_sz_bytes, 1<<log2sz);
-			return L4_fpage_t::create_nil();
-		}
-
-		L4_fpage_t res = L4_fpage_t::create_nil();
-		fpages_t& pgs = _fpages[log2sz - Log2sz_min];
-		if (pgs.empty())
-			split(log2sz + 1);
-
-		//assert(!pgs.empty())
-
-		if (!pgs.empty())
-		{
-			fpages_t::iter_t it = pgs.begin();
-			res = *it;
-			pgs.erase(it);
-			_pool_sz_bytes -= res.size();
-		}
-		return res;
-	}
-
-	L4_fpage_t alloc(size_t sz)
-	{
-		//wrm_logd("%s:  sz=0x%zx, pool_sz=0x%zx.\n", __func__, sz, _pool_sz_bytes);
-		L4_fpage_t res = alloc_log2sz(log2sz(sz));
-		return res;
-	}
-
-	size_t size() const { return _pool_sz_bytes; }
-};
+extern "C" size_t wrm_pgpool_size()
+{
+	return pginst()->size();  // without mutex
+}
 
 //--------------------------------------------------------------------------------------------------
-// C API
+//  Memory pool - contents memory region and allow to allocate blocks.
 //--------------------------------------------------------------------------------------------------
+
+// use singltone to allow use pool before ctors
+static Memory_pool_t* minst()
+{
+	static Memory_pool_t _memory_pool;
+	return &_memory_pool;
+}
+
+static Wrm_mtx_t _mmtx = Wrm_mtx_initializer;
+
 extern "C" void wrm_mpool_dump()
 {
-	Memory_pool_t::inst().dump();
-}
-
-extern "C" void wrm_mpool_add(L4_fpage_t fpage)
-{
-	Memory_pool_t::inst().add(fpage);
-}
-
-extern "C" L4_fpage_t wrm_mpool_alloc(size_t sz)
-{
-	return Memory_pool_t::inst().alloc(sz);
-}
-
-extern "C" L4_fpage_t wrm_mpool_alloc_log2sz(size_t log2sz)
-{
-	return Memory_pool_t::inst().alloc_log2sz(log2sz);
-}
-
-extern "C" size_t wrm_mpool_size()
-{
-	return Memory_pool_t::inst().size();
-}
-
-// TODO:  try to use wrm_mpool_alloc() allocator
-extern "C" void* wrm_malloc(size_t sz)
-{
-	// FIXME:  do separate initialize functon, now may be raice condition
-	static Wrm_mtx_t mtx;
-	static int first = 1;
-	if (first)
+	int rc = wrm_mtx_lock(&_mmtx);
+	if (rc)
 	{
-		first = 0;
-		int rc = wrm_mtx_init(&mtx);
-		if (rc)
-		{
-			wrm_loge("%s:  wrm_mtx_init() - rc=%d.\n", __func__, rc);
-			return 0;
-		}
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return;
 	}
+	minst()->dump();
+	rc = wrm_mtx_unlock(&_mmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+}
 
-	sz = round_up(sz, 8);
+extern "C" int wrm_mpool_add(void* buf, size_t sz)
+{
+	int rc = wrm_mtx_lock(&_mmtx);
+	if (rc)
+	{
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return -1;
+	}
+	int res = minst()->add(buf, sz);
+	rc = wrm_mtx_unlock(&_mmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+	return res;
+}
 
-	enum { Sz = 256*1024 };
-	static char pool[Sz] __attribute__((aligned(8)));
-	static size_t free_sz = Sz;
-	static size_t free_pos = 0;
-
-	int rc = wrm_mtx_lock(&mtx);
+extern "C" void* wrm_mpool_alloc(size_t sz)
+{
+	int rc = wrm_mtx_lock(&_mmtx);
 	if (rc)
 	{
 		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
 		return 0;
 	}
+	void* res = minst()->alloc(sz);
+	rc = wrm_mtx_unlock(&_mmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+	return res;
+}
 
-	assert(sz <= free_sz);
-
-	if (sz > free_sz)
-		return 0;
-
-	void* res = &pool[free_pos];
-	free_sz  -= sz;
-	free_pos += sz;
-
-	//wrm_logd("%s:  size=%4u, ok, free=%u.\n", __func__, sz, free_sz);
-
-	rc = wrm_mtx_unlock(&mtx);
+extern "C" void wrm_mpool_free(void* ptr)
+{
+	int rc = wrm_mtx_lock(&_mmtx);
 	if (rc)
 	{
-		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
-		return 0;
+		wrm_loge("%s:  wrm_mtx_lock() - rc=%d.\n", __func__, rc);
+		return;
 	}
+	minst()->free(ptr);
+	rc = wrm_mtx_unlock(&_mmtx);
+	if (rc)
+		wrm_loge("%s:  wrm_mtx_unlock() - rc=%d.\n", __func__, rc);
+}
 
-	return res;
+extern "C" size_t wrm_mpool_size()
+{
+	return minst()->size();  // without mutex
 }

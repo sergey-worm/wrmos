@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include "sys_utils.h"
+#include "wlibc_panic.h"
 
 #define OPTIMISE
 
@@ -35,6 +36,7 @@ unsigned wlibc_stat_memcmp32 = 1;
 
 void* memcpy(void* dst, const void* src, size_t sz)
 {
+	assert(sz < 0xf0000000);
 	#ifdef OPTIMISE
 	// try to use 64-bit instructions
 	if (sz >= 32  &&  is_aligned3(dst, src, sz, sizeof(uint64_t)))
@@ -128,7 +130,7 @@ int memcmp(const void* ptr1, const void* ptr2, size_t sz)
 		while (sz--)
 		{
 			if (*p1 != *p2)
-				return ((*p1 - *p2) < 0) ? -1 : 1;
+				return ((*p1 - *p2) < 0) ? -1 : +1;
 			p1++;
 			p2++;
 		}
@@ -162,7 +164,7 @@ int strcmp(const char* s1, const char* s2)
 #endif
 
 #ifndef strncmp  // string.h may have implementation
-int strncmp(const char *s1, const char *s2, size_t n)
+int strncmp(const char* s1, const char* s2, size_t n)
 {
 	for (; n > 0; s1++, s2++, --n)
 		if (*s1 != *s2)
@@ -175,7 +177,7 @@ int strncmp(const char *s1, const char *s2, size_t n)
 
 size_t strlen(const char* str)
 {
-	const char *s;
+	const char* s;
 	for (s = str; *s; ++s);
 	return (s - str);
 }
@@ -286,7 +288,27 @@ char* strstr(const char* str, const char* substr)
 
 char* strtok(char* str, const char* delimiters)
 {
-	assert(0 && "Implement me!");
+	panic("%s:  implement me!\n", __func__);
 	return 0;
 }
 
+size_t strxfrm(char* dst, const char* src, size_t num)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+int strcoll(const char* str1, const char* str2)
+{
+	panic("%s:  implement me!\n", __func__);
+	return 0;
+}
+
+void* memchr(const void* ptr, int val, size_t num)
+{
+	unsigned char* p = (unsigned char*) ptr;
+	for (int i=0; i<num; ++i)
+		if (p[i] == (unsigned char)val)
+			return p + i;
+	return 0;
+}

@@ -244,9 +244,14 @@ public:
 		addr_t  new_va = Aspace::kmap_kstack(pa, Stack_sz);
 		// TODO:  Aspace::kunmap(va, Stack_sz);
 		_kstack_area = new_va;
+	}
+
+	void setup_kstack()
+	{
+		wassert(_kstack_area);
 		_ksp = _kstack_area + Stack_sz;
 
-		// init stack values for debug
+		// init stack area for debug
 		for (unsigned i=0; i<Stack_sz/sizeof(uint32_t); ++i)
 			((uint32_t*)(_kstack_area))[i] = Stack_32bit_val;
 	}
@@ -511,12 +516,11 @@ public:
 		wassert(_task->is_configured() && "activate:  aspace has not been configured.");
 
 		// map utcb
-		addr_t utcb_uva = task()->alloc_utcb_area();
+		addr_t utcb_uva = task()->alloc_utcb_uspace();
 		wassert(utcb_uva);
 		_task->map(utcb_uva, _utcb_pa, Cfg_page_sz, Acc_utcb, Cachable);
 		_utcb_uva = utcb_uva;
 
-		_task->thread_activated();
 		state(Active);
 	}
 
@@ -618,6 +622,16 @@ public:
 
 		// set user accesible thread name (wrm extention)
 		memcpy(kutcb()->tls, _name, 4);
+	}
+
+	inline void free_utcb_kspace()
+	{
+		if (_utcb_kva)
+		{
+			Aspace::kunmap_utcb(_utcb_kva);
+			_utcb_pa = -1;
+			_utcb_kva = -1;
+		}
 	}
 
 	Entry_frame_t* entry_frame() const

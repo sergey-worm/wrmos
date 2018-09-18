@@ -21,7 +21,7 @@ plat               = zynq
 brd                = zc706
 max_cpus           = 2
 sys_clock_hz       = 666666687
-ram_start          = 0x100000                  # reserv 1 MB for zynq bootloader
+ram_start          = 0x100000                  # reserve 1 MB for zynq bootloader
 ram_sz             = (0x40000000-$(ram_start)) # 1 GB
 page_sz            = 0x1000
 

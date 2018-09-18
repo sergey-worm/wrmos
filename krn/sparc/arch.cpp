@@ -50,13 +50,14 @@ void __attribute__((section(".user.text"))) arch_user_invoke()
 		"mov %g0, %i7       \n"
 	);
 
-	// load UTCB address from top of the stack to %g7
 	asm volatile
 	(
+		#if 0
 		"ld  [ %sp ], %g7   \n" // get UTCB address
-		#if 1
-		"set 0xff000000, %l0\n"
-		"st %g7, [%l0]      \n "
+		#else
+		"ld  [ %sp ], %l0   \n" // get UTCB address
+		"set 0xff000000, %l1\n"
+		"st %l0, [%l1]      \n "
 		#endif
 		"add %sp, 4, %sp    \n" // correct sp after pop start address
 	);

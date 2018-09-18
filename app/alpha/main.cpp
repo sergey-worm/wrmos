@@ -949,11 +949,11 @@ void get_memory_from_sigma0()
 		//wrm_logd("rcv memory:  addr=%#x, sz=%#x.\n", fpage.addr(), fpage.size());
 
 		memset((void*)fpage.addr(), 0, fpage.size());  // to check unmapped addresses
-		wrm_mpool_add(fpage);
-		//wrm_mpool_dump();
+		wrm_pgpool_add(fpage);
+		//wrm_pgpool_dump();
 	}
 
-	wrm_logi("got memory:  %#zx bytes.\n", wrm_mpool_size());
+	wrm_logi("got memory:  %#zx bytes.\n", wrm_pgpool_size());
 }
 
 // Use MemoryControl privilaged system call
@@ -1097,11 +1097,11 @@ void prepare_named_memory_regions(const Proj_cfg_t* proj_cfg)
 			panic("Wrong config for named memory.");
 		}
 
-		L4_fpage_t location = wrm_mpool_alloc(mem->sz);
+		L4_fpage_t location = wrm_pgpool_alloc(mem->sz);
 		if (location.is_nil())
 		{
 			wrm_loge("Could not allocate 0x%zx bytes for named memory '%s'.\n", mem->sz, mem->name);
-			wrm_mpool_dump();
+			wrm_pgpool_dump();
 			panic("Could not allocate memory.");
 		}
 
@@ -1267,11 +1267,8 @@ static void process_pfault(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	}
 
 	// grant/map
+	tag.set_ipc(0, 0, 2);
 	L4_map_item_t item = L4_map_item_t::create(local_fpage);
-	tag.ipc_label(0);
-	tag.propagated(false);
-	tag.untyped(0);
-	tag.typed(2);
 	L4_utcb_t* utcb = l4_utcb();
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = item.word0();
@@ -1596,11 +1593,8 @@ void process_attach_detach_int(L4_msgtag_t tag, word_t* mr, L4_thrid_t from, uns
 	} while (0);
 
 	// send reply
+	tag.set_ipc(action, 1, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(action);
-	tag.propagated(false);
-	tag.untyped(1);
-	tag.typed(0);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode ? -ecode : intno;
 	int rc = l4_send(from, L4_time_t::Never);
@@ -1747,10 +1741,10 @@ void process_usual_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		}
 
 		// allocate memory
-		location = wrm_mpool_alloc(req_sz);
+		location = wrm_pgpool_alloc(req_sz);
 		if (location.is_nil())
 		{
-			wrm_loge("mem_req:  wrm_mpool_alloc(0x%zx) - failed, mpool_sz=0x%zx.\n", req_sz, wrm_mpool_size());
+			wrm_loge("mem_req:  wrm_pgpool_alloc(0x%zx) - failed, mpool_sz=0x%zx.\n", req_sz, wrm_pgpool_size());
 			ecode = 3;  // memory not enough
 			break;
 		}
@@ -1761,7 +1755,7 @@ void process_usual_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		{
 			wrm_loge("mem_req:  wrm_app_set_location() - rc=%d.\n", rc);
 			ecode = 4;  // may be vspace crossing
-			wrm_mpool_add(location);  // put back to mpool
+			wrm_pgpool_add(location);  // put back to mpool
 			break;
 		}
 
@@ -1796,7 +1790,7 @@ void process_usual_memory_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
-	assert(tag.untyped() == 5);
+	assert(tag.untyped() == 7);
 	assert(tag.typed() == 0);
 	//wrm_logi("request:  create thread.\n");
 
@@ -1823,12 +1817,21 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			break;
 		}
 
-		// alloc thread number
+		// incomming params
+		L4_fpage_t  rem_utcb = L4_fpage_t::create(mr[1]);
+		unsigned prio = mr[2];
+		L4_thrid_t space(mr[3]);
+		L4_thrid_t sched(mr[4]);
+		L4_thrid_t pager(mr[5]);
+		addr_t stack = mr[6];
+		addr_t stack_sz = mr[7];
+
+		// alloc thread
 		unsigned newno = 0;
-		int rc = wrm_app_alloc_thrno(from, &newno);
+		int rc = wrm_app_thr_alloc(from, &newno, rem_utcb, stack, stack_sz);
 		if (rc)
 		{
-			wrm_loge("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
+			wrm_loge("%s:  wrm_app_thr_alloc() - rc=%d.\n", __func__, rc);
 			ecode = 2;  // no free threads
 			break;
 		}
@@ -1845,11 +1848,6 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 		// create thread
 		newid = L4_thrid_t::create_global(newno);
-		L4_fpage_t  rem_utcb = L4_fpage_t::create(mr[1]);
-		unsigned prio = mr[2];
-		L4_thrid_t space(mr[3]);
-		L4_thrid_t sched(mr[4]);
-		L4_thrid_t pager(mr[5]);
 
 		// check prio
 		if (prio > max_prio)
@@ -1859,7 +1857,7 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			prio = max_prio;
 		}
 
-		// find local address for rem_utcb area
+		// find local address for rem_utcb
 		L4_fpage_t loc_utcb;
 		rc = wrm_app_get_location(from, rem_utcb.addr(), rem_utcb.size(), Acc_rw, &loc_utcb);
 		if (rc)
@@ -1897,11 +1895,8 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	} while (0);
 
 	// send reply
+	tag.set_ipc(Wrm_ipc_create_thread, 2, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_create_thread);
-	tag.propagated(false);
-	tag.untyped(2);
-	tag.typed(0);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = newid.raw();
@@ -1913,9 +1908,145 @@ void process_create_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	}
 }
 
+void process_delete_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
+{
+	assert(tag.untyped() == 2);
+	assert(tag.typed() == 0);
+	//wrm_logd("request:  delete thread.\n");
+
+	L4_utcb_t* utcb = l4_utcb();
+	L4_thrid_t thrid = utcb->mr[1];
+	long term_code = utcb->mr[2];
+	int ecode = 0;
+	unsigned thrno_begin = 0;
+	unsigned thrno_end = 0;
+	int state = -1;
+
+	do
+	{
+		// check permission
+		int rc = wrm_app_thr_numbers(from, &thrno_begin, &thrno_end);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_thr_numbers() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+			ecode = 1;
+			break;
+		}
+		if (thrid.number() < thrno_begin  ||  thrid.number() >= thrno_end)
+		{
+			wrm_loge("%s:  alien thread=%u, sender=%u.\n", __func__, thrid.number(), from.number());
+			ecode = 2;
+			break;
+		}
+
+		// get current thread state
+		state = wrm_app_thr_state(thrid, thrid.number());
+		if (state < 0)
+		{
+			wrm_loge("%s:  wrm_app_thr_state() - rc=%d, thr=%u.\n", __func__, state, thrid.number());
+			ecode |= 1;
+		}
+
+		if (state == Wrm_thr_state_done)
+			break;  // already terminated - need free and send reply
+
+		// delete thread
+		rc = l4_thread_control(thrid, L4_thrid_t::Nil, L4_thrid_t::Nil, L4_thrid_t::Nil, L4_fpage_t::Nil);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_thread_control() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+			ecode |= 10;
+		}
+
+		// terminate thread in alpha
+		rc = wrm_app_thr_terminate(thrid, thrid.number(), term_code);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_thr_terminate() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+			ecode |= 100;
+		}
+
+		// if deleted main thread - delete all threads
+		if (thrid.number() == thrno_begin)
+		{
+			// free thread in alpha
+			L4_fpage_t utcb;
+			addr_t stack;
+			size_t stack_sz;
+			long tcode;
+			rc = wrm_app_thr_free(thrid, thrid.number(), &utcb, &stack, &stack_sz, &tcode);
+			if (rc)
+			{
+				wrm_loge("%s:  wrm_app_thr_free() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+				ecode |= 1000;
+			}
+
+			// delete all app threads
+			for (unsigned i=thrno_begin+1; i<thrno_end; i++)
+			{
+				// terminate thread in alpha
+				rc = wrm_app_thr_terminate(thrid, i, term_code);
+				if (rc)
+					continue;  // no such thread
+
+				// free thread in alpha
+				rc = wrm_app_thr_free(thrid, i, &utcb, &stack, &stack_sz, &tcode);
+				if (rc)
+				{
+					wrm_loge("%s:  wrm_app_thr_free() - rc=%d, thr=%u.\n", __func__, rc, i);
+					ecode |= 10000;
+				}
+				L4_thrid_t thrid = L4_thrid_t::create_global(i);
+				rc = l4_thread_control(thrid, L4_thrid_t::Nil, L4_thrid_t::Nil, L4_thrid_t::Nil, L4_fpage_t::Nil);
+				if (rc)
+				{
+					wrm_loge("%s:  l4_thread_control() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+					ecode |= 100000;
+				}
+			}
+			wrm_logi("app=%u terminated.\n", thrid.number());
+		}
+	} while (0);
+
+	// if not self-termination and not main thread -- free and send reply
+	if (thrid != from  &&  thrid.number() != thrno_begin)
+	{
+		//wrm_logd("%s:  thr=%u:  free and send reply.\n", __func__, thrid.number());
+
+		// free thread in alpha
+		L4_fpage_t rem_utcb;
+		addr_t stack;
+		size_t stack_sz;
+		long tcode;
+		int rc = wrm_app_thr_free(thrid, thrid.number(), &rem_utcb, &stack, &stack_sz, &tcode);
+		if (rc)
+		{
+			wrm_loge("%s:  wrm_app_thr_free() - rc=%d, thr=%u.\n", __func__, rc, thrid.number());
+			ecode |= 1000000;
+		}
+
+		// send reply
+		tag.set_ipc(Wrm_ipc_delete_thread, 7, 0);
+		utcb->mr[0] = tag.raw();
+		utcb->mr[1] = ecode;
+		utcb->mr[2] = thrid.raw();
+		utcb->mr[3] = rem_utcb.raw();
+		utcb->mr[4] = stack;
+		utcb->mr[5] = stack_sz;
+		utcb->mr[6] = tcode;
+		utcb->mr[7] = state;
+		rc = l4_send(from, L4_time_t::Zero);
+		if (rc)
+		{
+			wrm_loge("%s:  l4_send() - rc=%u.\n", __func__, rc);
+			panic("l4_send() - failed");
+		}
+	}
+}
+
 void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 {
-	assert(tag.untyped() == 4);
+	assert(tag.untyped() == 5);
 	assert(tag.typed() == 0);
 	//wrm_logi("request:  create thread with new aspace.\n");
 
@@ -1951,12 +2082,21 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			break;
 		}
 
-		// alloc thread number
+		// incomming params
+		L4_fpage_t rem_utcb = L4_fpage_t::create(mr[1]);
+		unsigned prio = mr[2];
+		L4_thrid_t inc_pager(mr[3]);
+		L4_fpage_t kip_area = L4_fpage_t::create(mr[4]);
+		L4_fpage_t utcbs_area = L4_fpage_t::create(mr[5]);
+		addr_t stack = mr[6];
+		addr_t stack_sz = mr[7];
+
+		// alloc thread
 		unsigned newno = 0;
-		rc = wrm_app_alloc_thrno(from, &newno);
+		rc = wrm_app_thr_alloc(from, &newno, rem_utcb, stack, stack_sz);
 		if (rc)
 		{
-			wrm_loge("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
+			wrm_loge("%s:  wrm_app_thr_alloc() - rc=%d.\n", __func__, rc);
 			ecode = 3;  // no free threads
 			break;
 		}
@@ -1973,10 +2113,6 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 
 		// create task
 		newid = L4_thrid_t::create_global(newno);
-		L4_fpage_t rem_utcbs = L4_fpage_t::create(mr[1]);
-		unsigned prio = mr[2];
-		L4_thrid_t inc_pager(mr[3]);
-		L4_fpage_t kip_area = L4_fpage_t::create(mr[4]);
 
 		// check prio
 		if (prio > max_prio)
@@ -1985,15 +2121,15 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 			prio = max_prio;
 		}
 
-		// find local address for rem_utcbs
-		L4_fpage_t loc_utcbs;
-		rc = wrm_app_get_location(from, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, &loc_utcbs);
-		assert(rem_utcbs.size() == loc_utcbs.size());
+		// find local address for rem_utcb
+		L4_fpage_t loc_utcb;
+		rc = wrm_app_get_location(from, rem_utcb.addr(), rem_utcb.size(), Acc_rw, &loc_utcb);
+		assert(rem_utcb.size() == loc_utcb.size());
 		if (rc)
 		{
-			wrm_loge("%s:  wrm_app_get_location(utcbs=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
-				__func__, rem_utcbs.addr(), rem_utcbs.size(), Acc_rw, rc);
-			ecode = 5;  // bad utcbs
+			wrm_loge("%s:  wrm_app_get_location(utcb=0x%lx, sz=0x%lx, acc=%d) - rc=%d.\n",
+				__func__, rem_utcb.addr(), rem_utcb.size(), Acc_rw, rc);
+			ecode = 5;  // bad utcb
 			break;
 		}
 
@@ -2002,7 +2138,7 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		L4_thrid_t space = newid;  // =dest for aspace creation
 		L4_thrid_t sched = alpha;  // alpha to can set prio below via l4_schedule
 		L4_thrid_t pager = L4_thrid_t::Nil;
-		rc = l4_thread_control(newid, space, sched, pager, loc_utcbs.addr());
+		rc = l4_thread_control(newid, space, sched, pager, loc_utcb.addr());
 		if (rc)
 		{
 			wrm_loge("%s:  l4_thread_control() - rc=%d.\n", __func__, rc);
@@ -2022,7 +2158,7 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 		// configure application's aspace via SpaceControl
 		word_t control = 0;
 		L4_thrid_t redirector = L4_thrid_t::Nil;
-		rc = l4_space_control(newid, control, kip_area, loc_utcbs, redirector);
+		rc = l4_space_control(newid, control, kip_area, utcbs_area, redirector);
 		if (rc)
 		{
 			wrm_loge("%s:  l4_space_control() - rc=%d.\n", __func__, rc);
@@ -2042,11 +2178,8 @@ void process_create_task_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	} while (0);
 
 	// send reply
+	tag.set_ipc(Wrm_ipc_create_task, 2, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_create_task);
-	tag.propagated(false);
-	tag.untyped(2);
-	tag.typed(0);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = newid.raw();
@@ -2082,11 +2215,8 @@ void process_register_thread_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t fro
 	} while (0);
 
 	// send reply
+	tag.set_ipc(Wrm_ipc_register_thread, 3, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_register_thread);
-	tag.propagated(false);
-	tag.typed(0);
-	tag.untyped(3);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = key0;
@@ -2125,11 +2255,8 @@ void process_get_thread_id_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	} while (0);
 
 	// send reply
+	tag.set_ipc(Wrm_ipc_get_thread_id, 4, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_get_thread_id);
-	tag.propagated(false);
-	tag.typed(0);
-	tag.untyped(4);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = id.raw();
@@ -2154,14 +2281,11 @@ void process_app_threads_request(L4_msgtag_t tag, word_t* mr, L4_thrid_t from)
 	unsigned thrno_begin = 0;
 	unsigned thrno_end = 0;
 
-	int ecode = wrm_app_get_thr_numbers(app_id, &thrno_begin, &thrno_end);
+	int ecode = wrm_app_thr_numbers(app_id, &thrno_begin, &thrno_end);
 
 	// send reply
+	tag.set_ipc(Wrm_ipc_app_threads, 3, 0);
 	L4_utcb_t* utcb = l4_utcb();
-	tag.ipc_label(Wrm_ipc_app_threads);
-	tag.propagated(false);
-	tag.untyped(3);
-	tag.typed(0);
 	utcb->mr[0] = tag.raw();
 	utcb->mr[1] = ecode;
 	utcb->mr[2] = thrno_begin;
@@ -2252,6 +2376,7 @@ int main()
 				case Wrm_ipc_get_usual_mem:    process_usual_memory_request(tag, mr, from);    break;
 				case Wrm_ipc_get_named_mem:    process_named_memory_request(tag, mr, from);    break;
 				case Wrm_ipc_create_thread:    process_create_thread_request(tag, mr, from);   break;
+				case Wrm_ipc_delete_thread:    process_delete_thread_request(tag, mr, from);   break;
 				case Wrm_ipc_create_task:      process_create_task_request(tag, mr, from);     break;
 				case Wrm_ipc_register_thread:  process_register_thread_request(tag, mr, from); break;
 				case Wrm_ipc_get_thread_id:    process_get_thread_id_request(tag, mr, from);   break;

@@ -112,7 +112,7 @@ include $(wrmdir)/mk/syscfg.mk
 #  ELF CHECK RULES
 #---------------------------------------------------------------------------------------------------
 
-.PHONY:  $(foreach f,$(ramfs_elfs),$f.CHECK)
+.PHONY:  $(foreach f,$(ramfs_elfs),$f.CHECK) FORCE
 
 # $1 - path to elf
 define create_elf_rules
@@ -190,18 +190,22 @@ $(blddir)/link.ld:  $(blddir)/link.ld.S $(ldaddr_file)
 # a) local arch link file
 # b) if it is absent - common local link file
 # c) if it is absent - app-link file
-$(blddir)/link.ld.S:
+$(blddir)/link.ld.S:  FORCE
 	@mkdir -p $(dir $@)
-	@if [ -a $(arch)/link.ld.S ] ; then \
-		$(echo) "$(color_compile)[CP]  $(notdir $(target)):  $(arch)/link.ld.S --> $(notdir $@)$(color_off)"; \
-		cp $(arch)/link.ld.S $@; \
+	@if [ -a $(arch)/link.ld.S ]; then \
+		src=$(arch)/link.ld.S; \
+		disp=$(arch)/link.ld.S; \
 	elif [ -a link.ld.S ] ; then \
-		$(echo) "$(color_compile)[CP]  $(notdir $(target)):  link.ld.S --> $(notdir $@)$(color_off)"; \
-		cp link.ld.S $@; \
+		src=link.ld.S; \
+		disp=link.ld.S; \
 	else \
-		$(echo) "$(color_compile)[CP]  $(notdir $(target)):  ../link.ld.S --> $(notdir $@)$(color_off)"; \
-		cp $(wrmdir)/app/link.ld.S $@; \
-	fi;
+		src=$(wrmdir)/app/link.ld.S; \
+		disp=app/link.ld.S; \
+	fi; \
+	if [ $$src -nt $@ ];  then \
+		$(echo) "$(color_compile)[CP]  $(notdir $(target)):  $$disp --> $(notdir $@)$(color_off)"; \
+		cp $$src $@; \
+	fi
 
 $(blddir)/lib%.a:  $(objects)
 	@$(echo) "$(color_compile)[AR]  $(notdir $(target)):  $(notdir $(objects)) --> $(notdir $@)$(color_off)"

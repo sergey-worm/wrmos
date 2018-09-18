@@ -13,12 +13,16 @@
 extern "C" {
 #endif
 
+void       wrm_pgpool_dump();
+void       wrm_pgpool_add(L4_fpage_t fpage);
+L4_fpage_t wrm_pgpool_alloc(size_t sz);
+size_t     wrm_pgpool_size();
+
 void       wrm_mpool_dump();
-void       wrm_mpool_add(L4_fpage_t fpage);
-L4_fpage_t wrm_mpool_alloc(size_t sz);
-L4_fpage_t wrm_mpool_alloc_log2sz(size_t log2sz);
+int        wrm_mpool_add(void* buf, size_t sz);
+void*      wrm_mpool_alloc(size_t sz);
+void       wrm_mpool_free(void* ptr);
 size_t     wrm_mpool_size();
-void*      wrm_malloc(size_t sz);
 
 #ifdef __cplusplus
 }

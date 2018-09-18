@@ -66,7 +66,6 @@ WrmOS have own implementation of next components:
 1. Run WrmOS on real hardware for x86 and x86_64;
 1. Support SMP;
 1. Support ROS API (ros.org);
-1. Support OROCOS API (orocos.org).
 
 ## Contacts
 

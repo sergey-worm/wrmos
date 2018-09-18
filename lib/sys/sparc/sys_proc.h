@@ -45,6 +45,7 @@ public:
 	static inline word_t i6()  { word_t r; asm volatile ("mov %%fp,  %0" : "=r"(r)); return r; }
 	static inline word_t i7()  { word_t r; asm volatile ("mov %%i7,  %0" : "=r"(r)); return r; }
 	static inline word_t fp()  { return i6(); }
+	static inline word_t g7()  { word_t r; asm volatile ("mov %%g7,  %0" : "=r"(r)); return r; }
 
 	static inline void psr(word_t r)      { asm volatile("mov %0, %%psr; nop; nop; nop" : : "r"(r)); }
 	static inline void psr_fast(word_t r) { asm volatile("mov %0, %%psr" : : "r"(r)); }
@@ -52,6 +53,7 @@ public:
 	static inline void wim(word_t r)      { asm volatile("mov %0, %%wim; nop; nop; nop" : : "r"(r));  }
 	static inline void sp(word_t r)       { asm volatile("mov %0, %%sp" : : "r"(r));  }
 	static inline void o7(word_t r)       { asm volatile("mov %0, %%o7" : : "r"(r));  }
+	static inline void g7(word_t r)       { asm volatile("mov %0, %%g7" : : "r"(r));  }
 
 	static inline void i0(word_t r)       { asm volatile("mov %0, %%i0" : : "r"(r));  }
 	static inline void i1(word_t r)       { asm volatile("mov %0, %%i1" : : "r"(r));  }
@@ -163,6 +165,9 @@ public:
 	{
 		return lda(pa, Asi_mmu_bypass);
 	}
+
+	static inline void tls(word_t v) { g7(v); }
+	static inline word_t tls() { return g7(); }
 
 	static inline void dcache_flush()
 	{

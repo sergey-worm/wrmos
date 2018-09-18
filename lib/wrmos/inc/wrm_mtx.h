@@ -9,15 +9,23 @@
 
 #include "wrm_sem.h"
 
+typedef Wrm_sem_t Wrm_mtx_t;
+
+#define Wrm_mtx_initializer           Wrm_sem_binary_unlocked_initializer
+#define Wrm_mtx_recursive_initializer Wrm_sem_binary_recursive_unlocked_initializer
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef Wrm_sem_t Wrm_mtx_t;
-
 inline int wrm_mtx_init(Wrm_mtx_t* mtx)
 {
 	return wrm_sem_init(mtx, Wrm_sem_binary, 1);
+}
+
+inline int wrm_mtx_init_recursive(Wrm_mtx_t* mtx)
+{
+	return wrm_sem_init(mtx, Wrm_sem_binary | Wrm_sem_recursive, 1);
 }
 
 inline int wrm_mtx_destroy(Wrm_mtx_t* mtx)
@@ -25,11 +33,7 @@ inline int wrm_mtx_destroy(Wrm_mtx_t* mtx)
 	return wrm_sem_destroy(mtx);
 }
 
-#ifdef __cplusplus
-inline int wrm_mtx_lock(Wrm_mtx_t* mtx, int timeout_usec = Wrm_sem_timeout_infinite)
-#else
-inline int wrm_mtx_lock(Wrm_mtx_t* mtx, int timeout_usec)
-#endif
+inline int wrm_mtx_lock(Wrm_mtx_t* mtx, int timeout_usec Default(Wrm_sem_timeout_infinite))
 {
 	return wrm_sem_wait(mtx, timeout_usec);
 }

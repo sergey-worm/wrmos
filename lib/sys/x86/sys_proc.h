@@ -77,6 +77,8 @@ public:
 	static inline word_t fs()  { word_t v; asm volatile("mov %%fs,  %0" : "=r"(v)); return v; }
 	static inline word_t gs()  { word_t v; asm volatile("mov %%gs,  %0" : "=r"(v)); return v; }
 
+	static inline void gs(word_t v) {  asm volatile("mov %0, %%gs" :: "r"(v));  }
+
 	static inline word_t eflags() { word_t v; asm volatile("pushf; pop %0" : "=r"(v)); return v; }
 	static inline word_t eip()    { word_t v; asm volatile("call 1f; 1: pop %0" : "=r"(v)); return v; }
 
@@ -88,7 +90,7 @@ public:
 	static inline void cr3(word_t v) { asm volatile("mov %0, %%cr3" :: "r"(v)); }
 	static inline void cr4(word_t v) { asm volatile("mov %0, %%cr4" :: "r"(v)); }
 
-	static inline word_t sp()  { word_t r=0; asm volatile ("mov %%esp, %0" : "=r"(r));  return r; }
+	static inline word_t sp()  { word_t v; asm volatile ("mov %%esp, %0" : "=r"(v));  return v; }
 	static inline void sp(word_t r) {  asm volatile("mov %0, %%esp" :: "r"(r));  }
 
 	static inline void enable_irq() { asm volatile ("sti"); }
@@ -105,6 +107,9 @@ public:
 	static inline void wmb()        { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
 	static inline void wait_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
 	static inline void send_event() { asm volatile ("" ::: "memory"); }    // FIXME:  IMPLME
+
+	static inline void tls(word_t v) { /*gs(v);*/ (void)v; }
+	static inline word_t tls() { return 0/*gs()*/; }
 
 	static inline void dcache_flush()
 	{

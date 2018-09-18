@@ -868,7 +868,7 @@ static int receive_from_drv(char* buf, unsigned len, unsigned* received)
 
 //--------------------------------------------------------------------------------------------------
 // wait data from driver
-static int driver_rx_thread(int unused)
+static long driver_rx_thread(long unused)
 {
 	L4_utcb_t* utcb = l4_utcb();
 	wrm_logi("drv:  myid=%u.\n", utcb->global_id().number());
@@ -902,7 +902,7 @@ static int driver_rx_thread(int unused)
 
 //--------------------------------------------------------------------------------------------------
 // wait msgs from clients
-static int client_thread(int unused)
+static long client_thread(long unused)
 {
 	L4_utcb_t* utcb = l4_utcb();
 	wrm_logi("cli:  myid=%u.\n", utcb->global_id().number());
@@ -988,22 +988,22 @@ int main(int argc, const char* argv[])
 	rx_cbuf.init(rx_buf, sizeof(rx_buf));
 
 	// create driver thread
-	L4_fpage_t stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	L4_fpage_t utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	L4_fpage_t stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	L4_fpage_t utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp, driver_rx_thread, 0, stack_fp.addr(), stack_fp.size(),
-	                      255, "c-dr", Wrm_thr_flag_no, &app.loc_drv);
+	rc = wrm_thr_create(utcb_fp, driver_rx_thread, 0, stack_fp.addr(), stack_fp.size(),
+	                    255, "c-dr", Wrm_thr_flag_no, &app.loc_drv);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, app.loc_drv.number());
 	assert(!rc && "failed to create driver thread");
 
 	// create Client thread
-	stack_fp = wrm_mpool_alloc(Cfg_page_sz);
-	utcb_fp = wrm_mpool_alloc(Cfg_page_sz);
+	stack_fp = wrm_pgpool_alloc(Cfg_page_sz);
+	utcb_fp = wrm_pgpool_alloc(Cfg_page_sz);
 	assert(!stack_fp.is_nil());
 	assert(!utcb_fp.is_nil());
-	rc = wrm_thread_create(utcb_fp, client_thread, 0, stack_fp.addr(), stack_fp.size(),
-	                      255, "c-cl", Wrm_thr_flag_no, &app.loc_cli);
+	rc = wrm_thr_create(utcb_fp, client_thread, 0, stack_fp.addr(), stack_fp.size(),
+	                    255, "c-cl", Wrm_thr_flag_no, &app.loc_cli);
 	wrm_logi("create_thread:  rc=%d, id=%u.\n", rc, app.loc_cli.number());
 	assert(!rc && "failed to create Client thread");
 

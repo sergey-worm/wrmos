@@ -22,9 +22,9 @@
 #include "wlibc_panic.h"
 
 
-void* my_malloc(size_t sz_req, size_t* sz_rep)
+void* region_list_malloc(size_t sz_req, size_t* sz_rep)
 {
-	L4_fpage_t fpage = wrm_mpool_alloc(round_up(sz_req, Cfg_page_sz));
+	L4_fpage_t fpage = wrm_pgpool_alloc(round_up(sz_req, Cfg_page_sz));
 	//wrm_logd("%s:  sz_req=%zu, sz_rep=%lu.\n", __func__, sz_req, fpage.size());
 	assert(!fpage.is_nil());
 	if (fpage.is_nil())
@@ -36,7 +36,96 @@ void* my_malloc(size_t sz_req, size_t* sz_rep)
 //--------------------------------------------------------------------------------------------------
 //  App-manager
 //--------------------------------------------------------------------------------------------------
-class App_map_t
+class Thr_t
+{
+public:
+
+	int        state;
+	long       terminate_code;
+	L4_fpage_t utcb;
+	addr_t     stack_addr;
+	size_t     stack_sz;
+
+	Thr_t() : state(Wrm_thr_state_free) {}
+};
+
+class Thrs_t
+{
+	Thr_t    _threads[32];
+	unsigned _threads_max;
+
+public:
+
+	void max(unsigned threads_max)
+	{
+		assert(threads_max <= sizeof(_threads)/sizeof(_threads[0]));
+		_threads_max = threads_max;
+		for (unsigned i=0; i<_threads_max; ++i)
+			_threads[i].state = Wrm_thr_state_free;
+	}
+
+	unsigned max() const
+	{
+		return _threads_max;
+	}
+
+	// find free and return thread index
+	int alloc(L4_fpage_t utcb, addr_t stack_addr, size_t stack_sz)
+	{
+		for (unsigned i=0; i<_threads_max; ++i)
+		{
+			Thr_t* t = &_threads[i];
+			if (t->state == Wrm_thr_state_free)
+			{
+				t->state      = Wrm_thr_state_busy;
+				t->utcb       = utcb;
+				t->stack_addr = stack_addr;
+				t->stack_sz   = stack_sz;
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	// return thread state
+	int state(unsigned thr_index)
+	{
+		if (thr_index >= _threads_max)
+			return -1;
+		return _threads[thr_index].state;
+	}
+
+	// set terminate code and update state
+	int terminate(unsigned thr_index, long term_code)
+	{
+		if (thr_index >= _threads_max)
+			return -1;
+		Thr_t* t = &_threads[thr_index];
+		if (t->state != Wrm_thr_state_busy)
+			return -2;
+		t->terminate_code = term_code;
+		t->state = Wrm_thr_state_done;
+		return 0;
+	}
+
+	// return thread params and update state
+	int free(unsigned thr_index, L4_fpage_t* utcb, addr_t* stack_addr, size_t* stack_sz, long* term_code)
+	{
+		if (thr_index >= _threads_max)
+			return -1;
+		Thr_t* t = &_threads[thr_index];
+		if (t->state != Wrm_thr_state_done)
+			return -2;
+		*utcb       = t->utcb;
+		*stack_addr = t->stack_addr;
+		*stack_sz   = t->stack_sz;
+		*term_code  = t->terminate_code;
+		t->state    = Wrm_thr_state_free;
+		return 0;
+	}
+};
+
+class App_t
 {
 	struct region_t
 	{
@@ -70,10 +159,8 @@ class App_map_t
 	unsigned _max_aspaces;     // max aspaces in app
 	unsigned _aspaces_in_use;  // aspaces in use
 
-	// thread IDs data
-	unsigned _max_threads;     // max threads in app
-	uint32_t _busy_thrno;      // busy bits: 0 - free, 1 - busy
-	enum { Max_threads_limit = 8 * sizeof(_busy_thrno) };
+	// threads data
+	Thrs_t _threads;
 
 	// config params
 	uint8_t _max_prio;
@@ -82,18 +169,18 @@ class App_map_t
 
 public:
 
-	explicit App_map_t(L4_thrid_t id) : _regions(/*dprint_list_regions*/), _owner(id), _entry(0), _sp(0)
+	explicit App_t(L4_thrid_t id) : _regions(/*dprint_list_regions*/), _owner(id), _entry(0), _sp(0)
 	{
-		//wrm_logd("  App_map_t::ctor:  id=%u, regs.cap()=%u.\n", _owner.number(), _regions.capacity());
-		_regions.set_allocator(my_malloc);
+		//wrm_logd("  App_t::ctor:  id=%u, regs.cap()=%u.\n", _owner.number(), _regions.capacity());
+		_regions.set_allocator(region_list_malloc);
 	}
 
-	~App_map_t()
+	~App_t()
 	{
-		//wrm_logd("  App_map_t::dtor:  id=%u.\n", _owner.number());
+		//wrm_logd("  App_t::dtor:  id=%u.\n", _owner.number());
 	}
 
-	App_map_t operator = (const App_map_t& right)
+	App_t operator = (const App_t& right)
 	{
 		_regions = right._regions;
 		_owner   = right._owner;
@@ -105,7 +192,7 @@ public:
 	void utcb(L4_fpage_t v)         { _utcb  = v;      add_vspace(v);   }
 	void name(const char* v)        { _name = *(word_t*)v;              }
 	void max_aspaces(unsigned v)    { _max_aspaces = v;                 }
-	void max_threads(unsigned v)    { _max_threads = v; assert(v < Max_threads_limit); }
+	void max_threads(unsigned v)    { _threads.max(v);                  }
 	void max_prio(unsigned v)       { _max_prio = v;                    }
 	void fpu(bool v)                { _fpu = v;                         }
 	void malloc_strategy(int v)     { _malloc_strategy = v;             }
@@ -121,13 +208,14 @@ public:
 	L4_thrid_t  owner()           const { return _owner;           }
 	addr_t      entry()           const { return _entry;           }
 	addr_t      stack_ua()        const { return _stack_ua;        }
+	size_t      stack_sz()        const { return _stack_sz;        }
 	addr_t      sp()              const { return _sp;              }
 	L4_fpage_t  kip()             const { return _kip;             }
 	L4_fpage_t  utcb()            const { return _utcb;            }
 	word_t      name()            const { return _name;            }
 	const char* name_str()        const { return (char*)&_name;    } // no null terminator !
 	unsigned    max_aspaces()     const { return _max_aspaces;     }
-	unsigned    max_threads()     const { return _max_threads;     }
+	unsigned    max_threads()     const { return _threads.max();   }
 	uint8_t     max_prio()        const { return _max_prio;        }
 	bool        fpu()             const { return _fpu;             }
 	int         malloc_strategy() const { return _malloc_strategy; }
@@ -159,41 +247,42 @@ public:
 		return true;
 	}
 
-	unsigned alloc_thrno()
+	int thread_alloc(L4_fpage_t utcb, addr_t stack_addr, size_t stack_sz)
 	{
-		for (unsigned i=0; i<_max_threads; ++i)
-		{
-			// find free bit
-			if (!((_busy_thrno >> i) & 0x1))
-			{
-				_busy_thrno |= 1 << i;
-				return _owner.number() + i;
-			}
-		}
-		return 0; // no three thread IDs
+		assert(!utcb.is_nil());
+		assert(stack_addr);
+		assert(stack_sz);
+		int thr_index = _threads.alloc(utcb, stack_addr, stack_sz);
+		return (thr_index < 0) ? thr_index : (thr_index + _owner.number());
 	}
 
-	bool free_thrno(unsigned thrno)
+	int thread_state(unsigned thrno)
 	{
-		if (thrno < _owner.number()  ||  thrno >= (_owner.number() + _max_threads))
-		{
-			assert(false && "wrong thread num");
-			return 0;
-		}
-		_busy_thrno &= ~(1 << (thrno - _owner.number()));
-		return true;
+		assert(thrno >= _owner.number()  &&  thrno < (_owner.number() + _threads.max()));
+		return _threads.state(thrno - _owner.number());
 	}
 
-	bool get_thread_numbers(unsigned* thrno_begin, unsigned* thrno_end)
+	int thread_terminate(unsigned thrno, long term_code)
+	{
+		assert(thrno >= _owner.number()  &&  thrno < (_owner.number() + _threads.max()));
+		return _threads.terminate(thrno - _owner.number(), term_code);
+	}
+
+	int thread_free(unsigned thrno, L4_fpage_t* utcb, addr_t* stack_addr, size_t* stack_sz, long* term_code)
+	{
+		assert(thrno >= _owner.number()  &&  thrno < (_owner.number() + _threads.max()));
+		return _threads.free(thrno - _owner.number(), utcb, stack_addr, stack_sz, term_code);
+	}
+
+	bool thread_numbers(unsigned* thrno_begin, unsigned* thrno_end)
 	{
 		*thrno_begin = _owner.number();
-		*thrno_end   = _owner.number() + _max_threads;
+		*thrno_end   = _owner.number() + _threads.max();
 		return true;
 	}
 
 private:
 
-	// TODO:  support binary search in sorted list and use it here
 	// find memory region that contents [va,sz,acc]
 	regions_t::iter_t find(addr_t rem_va, size_t sz, acc_t acc)
 	{
@@ -250,7 +339,8 @@ public:
 			//	_regions.back().local, _regions.back().local_origin);
 		}
 
-		_regions.push_back(region_t(reg->remote + sz_before, sz_middle, reg->acc, reg->local, reg->local_origin + sz_before));
+		_regions.push_back(region_t(reg->remote + sz_before, sz_middle, reg->acc, reg->local,
+			reg->local_origin ? (reg->local_origin + sz_before) : 0));
 		//wrm_logw("%s:  add bite middle:  rem=0x%lx, sz=0x%lx, acc=%d, loc=0x%lx, loc_orig=0x%lx.\n",
 		//	__func__, _regions.back().remote, _regions.back().sz, _regions.back().acc,
 		//	_regions.back().local, _regions.back().local_origin);
@@ -259,7 +349,7 @@ public:
 		if (sz_after)
 		{
 			_regions.push_back(region_t(reg->remote + sz_before + sz_middle, sz_after, reg->acc, reg->local,
-				reg->local_origin + sz_before + sz_middle));
+				reg->local_origin ? (reg->local_origin + sz_before + sz_middle) : 0));
 			//wrm_logw("%s:  add bite after:   rem=0x%lx, sz=0x%lx, acc=%d, loc=0x%lx, loc_orig=0x%lx.\n",
 			//	__func__, _regions.back().remote, _regions.back().sz, _regions.back().acc,
 			//	_regions.back().local, _regions.back().local_origin);
@@ -298,15 +388,22 @@ public:
 					reg = split_to_smaller_regions(reg, rem_va, sz);
 
 				// allocate
-				L4_fpage_t fp = wrm_mpool_alloc(round_up(reg->sz, Cfg_page_sz));
+				L4_fpage_t fp = wrm_pgpool_alloc(round_pg_up(reg->sz));
 				assert(!fp.is_nil());
 				if (fp.is_nil())
 					return 0;
+
+				// FIXME:  allocated page may cross several regions, but reg->local set only for one
 				reg->local = fp.addr();
 
 				// initialize if need
 				if (reg->local_origin)
-					memcpy((void*)reg->local, (void*)reg->local_origin, reg->sz);
+				{
+					// copy all page instead of reg->sz, cause page may cross another regions
+					memcpy((void*)round_pg_down(reg->local), (void*)round_pg_down(reg->local_origin), round_pg_up(reg->sz));
+					//wrm_logw("memcpy:  local=%p, orig=0x%p, sz=0x%zx.\n",
+					//	(void*)reg->local, (void*)reg->local_origin, round_pg_up(reg->sz));
+				}
 			}
 
 			if (acc_max)
@@ -348,7 +445,7 @@ public:
 						// TODO:  implement me
 						assert(it->sz == Cfg_page_sz);
 						// allocate memory
-						L4_fpage_t fp = wrm_mpool_alloc(it->sz);
+						L4_fpage_t fp = wrm_pgpool_alloc(it->sz);
 						if (fp.is_nil())
 							panic("%s:  no mem.\n", __func__);
 						it->local = fp.addr();
@@ -410,7 +507,7 @@ public:
 		}
 
 		// alloc memory for args_page_rem_va
-		L4_fpage_t fp = wrm_mpool_alloc(Cfg_page_sz);
+		L4_fpage_t fp = wrm_pgpool_alloc(Cfg_page_sz);
 		assert(!fp.is_nil());
 		if (fp.is_nil())
 			panic("DEBUG ME");
@@ -468,32 +565,32 @@ public:
 		addr_t stack_location = get_location(_sp - stack_params_sz, stack_params_sz, Acc_rw);
 		assert(stack_location);
 		word_t* sp_location = (word_t*)(stack_location + stack_params_sz);
-		//wrm_logd("sp_location=0x%x, sp=0x%x.\n", (unsigned)sp_location, _sp);
+		//wrm_logd("sp_location=0x%p, sp=0x%lx.\n", sp_location, _sp);
 		sp_location[-1] = (addr_t)argv - diff_loc_rem;
 		sp_location[-2] = argc;
 		sp_location[-3] = _fpu;
 		_sp -= stack_params_sz;
-		//wrm_logd("argc=0x%x, argv=0x%x.\n\n", sp_location[-2], sp_location[-1]);
+		//wrm_logd("argc=0x%lx, argv=0x%lx.\n\n", sp_location[-2], sp_location[-1]);
 	}
 };
 
-class App_maps_t
+class Apps_t
 {
-	typedef list_t <App_map_t, 8> apps_t;
+	typedef list_t <App_t, 8> apps_t;
 	apps_t _apps;
 
 public:
 
-	App_maps_t() : _apps(/*dprint_list_apps*/) {}
+	Apps_t() : _apps(/*dprint_list_apps*/) {}
 
 	void dump(const char* mark = "")
 	{
-		wrm_logd("Dump app_maps (%zu)%s:\n", _apps.size(), mark);
+		wrm_logd("Dump apps (%zu)%s:\n", _apps.size(), mark);
 		for (apps_t::iter_t it=_apps.begin(); it!=_apps.end(); ++it)
 			it->dump();
 	}
 
-	App_map_t* find(L4_thrid_t id)
+	App_t* find(L4_thrid_t id)
 	{
 		for (apps_t::iter_t it=_apps.begin(); it!=_apps.end(); ++it)
 		{
@@ -505,13 +602,13 @@ public:
 		return 0;
 	}
 
-	App_map_t* add_app(L4_thrid_t id)
+	App_t* add_app(L4_thrid_t id)
 	{
-		_apps.push_back(App_map_t(id));
+		_apps.push_back(App_t(id));
 		return &_apps.back();
 	}
 };
-static App_maps_t app_maps;
+static Apps_t apps;
 
 //--------------------------------------------------------------------------------------------------
 //  ~ App-manager
@@ -535,7 +632,7 @@ static void process_elf_shdr(size_t label, addr_t addr, size_t sz, unsigned acce
 	//	label, addr, sz, acc2str(access), is_progbits_or_nobits, name);
 
 	if (is_progbits_or_nobits)
-		((App_map_t*)label)->add_vspace(addr, sz, access);
+		((App_t*)label)->add_vspace(addr, sz, access);
 }
 
 // callback func for elf_foreach()
@@ -546,14 +643,14 @@ static void process_elf_phdr(size_t label, addr_t vaddr, addr_t paddr, size_t sz
 	//	label, vaddr, paddr, sz, location, is_load);
 
 	if (is_load)
-		((App_map_t*)label)->set_location_from_elf(vaddr, sz, location);
+		((App_t*)label)->set_location_from_elf(vaddr, sz, location);
 }
 
-static App_map_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id, addr_t elf_addr, size_t elf_sz)
+static App_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id, addr_t elf_addr, size_t elf_sz)
 {
-	//wrm_logd("app:  %s:  id=%u.\n", __func__, id.number());
+	//wrm_logd("app:  %s:  id=%u, stack_sz=0x%x.\n", __func__, id.number(), cfg->stack_sz);
 
-	App_map_t* map = app_maps.add_app(id);
+	App_t* map = apps.add_app(id);
 	assert(map);
 	map->name(cfg->short_name);
 	map->max_aspaces(cfg->max_aspaces);
@@ -562,7 +659,7 @@ static App_map_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id
 	map->fpu(cfg->fpu);
 	map->malloc_strategy(cfg->malloc_strategy);
 
-	// preprocess elf - build memory map in app_maps
+	// preprocess elf - build memory map in apps
 	//wrm_logd("app:  prepare elf.\n");
 	addr_t entry = 0;
 	int rc = elf_foreach((const uint8_t*)elf_addr, elf_sz, process_elf_shdr, process_elf_phdr, (size_t)map, &entry, 0/*dprint_elf*/);
@@ -577,8 +674,9 @@ static App_map_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id
 	addr_t va = 0x1000000;  // start of user text/data
 
 	// set stack area
-	va -= Cfg_page_sz + guard_space;
-	map->stack(va, Cfg_page_sz);
+	size_t ssz = round_pg_up(cfg->stack_sz);
+	va -= ssz + guard_space;
+	map->stack(va, ssz);
 
 	// set kip area
 	va -= Cfg_page_sz + guard_space;
@@ -600,7 +698,7 @@ static App_map_t* prepare_app_memory_map(const Wrm_app_cfg_t* cfg, L4_thrid_t id
 	return map;
 }
 
-static void create_aspace_and_start_app_thread(App_map_t* app)
+static void create_aspace_and_start_app_thread(App_t* app)
 {
 	L4_thrid_t alpha = l4_utcb()->global_id();
 	//wrm_logi("app:  %s:  my=%u, dst=%u, ep=0x%lx, sp=0x%lx.\n", __func__, alpha.number(),
@@ -613,9 +711,9 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 
 	// alloc thread number
 	unsigned newno = 0;
-	rc = wrm_app_alloc_thrno(app->owner(), &newno);
+	rc = wrm_app_thr_alloc(app->owner(), &newno, app->utcb(), app->stack_ua(), app->stack_sz());
 	if (rc)
-		panic("%s:  wrm_app_alloc_thrnum() - rc=%d.\n", __func__, rc);
+		panic("%s:  wrm_app_thr_alloc() - rc=%d.\n", __func__, rc);
 	L4_thrid_t newid = L4_thrid_t::create_global(newno);
 	assert(newid == app->owner());
 
@@ -627,19 +725,19 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	assert(utcb_location);
 	rc = l4_thread_control(newid, space, sched, pager, utcb_location);
 	if (rc)
-		panic("%s:  l4_thread_control() - rc=%u.", __func__, rc);
+		panic("%s:  l4_thread_control() - rc=%d.", __func__, rc);
 
 	// set thread params via Schedule
 	rc = l4_schedule(newid, -1, -1, app->max_prio(), -1);
 	if (rc)
-		panic("l4_schedule() - rc=%u.", rc);
+		panic("l4_schedule() - rc=%d.", rc);
 
 	// configure application's aspace via SpaceControl
-	word_t control = 0; // FIXME
+	word_t control = 0;
 	L4_thrid_t redirector = L4_thrid_t::Nil;
 	rc = l4_space_control(newid, control, app->kip(), app->utcb(), redirector);
 	if (rc)
-		panic("l4_space_control() - rc=%u.", rc);
+		panic("l4_space_control() - rc=%d.", rc);
 
 	// activate aplication's thread via ThreadControl
 	space = newid;
@@ -647,7 +745,7 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	pager = alpha;
 	rc = l4_thread_control(newid, space, sched, pager, -1);
 	if (rc)
-		panic("%s:  l4_thread_control() - rc=%u.", __func__, rc);
+		panic("%s:  l4_thread_control() - rc=%d.", __func__, rc);
 
 	// start app by sending Thread_start msg
 	L4_utcb_t* utcb = l4_utcb();
@@ -662,7 +760,7 @@ static void create_aspace_and_start_app_thread(App_map_t* app)
 	utcb->mr[3] = app->name();
 	rc = l4_send(newid, L4_time_t::Zero);
 	if (rc)
-		panic("l4_send(start_msg) - rc=%u.\n", rc);
+		panic("l4_send(start_msg) - rc=%d.\n", rc);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -685,26 +783,24 @@ extern "C" int wrm_app_create(L4_thrid_t id, const Wrm_app_cfg_t* cfg)
 	int rc = wrm_ramfs_get_file(file_name, &elf_addr, &elf_sz);
 	//wrm_logi("app:  elf_file:  addr=0x%lx, sz=0x%zx.\n", elf_addr, elf_sz);
 	if (rc)
+	{
+		wrm_loge("app:  file=%s not found.\n", file_name);
 		return -2;  // file not found
+	}
 
-	App_map_t* app_map = prepare_app_memory_map(cfg, id, elf_addr, elf_sz);
-
-	//app_maps.dump();
-
+	App_t* app_map = prepare_app_memory_map(cfg, id, elf_addr, elf_sz);
 	create_aspace_and_start_app_thread(app_map);
-
 	return 0;
 }
 
 extern "C" int wrm_app_add_location(L4_thrid_t id, addr_t rem_va, L4_fpage_t location)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
 		return -1;
 	}
-
 	int rc = app->add_location(rem_va, location);
 	if (rc)
 	{
@@ -712,20 +808,18 @@ extern "C" int wrm_app_add_location(L4_thrid_t id, addr_t rem_va, L4_fpage_t loc
 			app->name_str(), rem_va, location.size(), location.addr(), rc);
 		return -2;
 	}
-
 	return 0;
 }
 
 extern "C" int wrm_app_get_location(L4_thrid_t id, addr_t rem_addr, size_t sz, acc_t acc, L4_fpage_t* loc_fpage)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("pfault from unknown thread 0x%lx/%u.\n", id.raw(), id.number());
-		app_maps.dump();
+		apps.dump();
 		return -1;
 	}
-
 	acc_t acc_max = 0;
 	addr_t local_addr = app->get_location(rem_addr, sz, acc, &acc_max);
 	if (!local_addr)
@@ -745,122 +839,126 @@ extern "C" int wrm_app_get_location(L4_thrid_t id, addr_t rem_addr, size_t sz, a
 		// ~FIXME
 		else
 		{
-			//app_maps.dump();
+			//apps.dump();
 			return -2;
 		}
 	}
-
 	//wrm_logi("found local page:  addr=0x%x, acc=%u, acc_max=%u.\n", local_addr, acc, acc_max);
-
 	*loc_fpage = L4_fpage_t::create(round_pg_down(local_addr), round_pg_up(sz), acc_max);
-
 	if (loc_fpage->is_nil())
 	{
 		wrm_loge("faild to do fpage, something going wrong.\n");
 		return -3;
 	}
-
 	return 0;
 }
 
 extern "C" int wrm_app_alloc_aspace(L4_thrid_t id)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
 		return -1;
 	}
-
 	bool ok = app->alloc_aspace();
 	if (!ok)
 	{
 		wrm_loge("app=%.4s:  no free aspaces, max=%u.\n", app->name_str(), app->max_aspaces());
 		return -2;
 	}
-
 	return 0;
 }
 
 extern "C" int wrm_app_free_aspace(L4_thrid_t id)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
 		return -1;
 	}
-
 	bool ok = app->free_aspace();
 	if (!ok)
 	{
 		wrm_loge("app=%.4s:  could not free aspace.\n", app->name_str());
 		return -2;
 	}
-
 	return 0;
 }
 
-extern "C" int wrm_app_alloc_thrno(L4_thrid_t id, unsigned* thrno)
+extern "C" int wrm_app_thr_alloc(L4_thrid_t id, unsigned* thrno, L4_fpage_t utcb, addr_t stack, size_t stack_sz)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
+	if (!app)
+	{
+		wrm_loge("%s:  unknown app thread=%u.\n", __func__, id.number());
+		return -10;
+	}
+	int rc = app->thread_alloc(utcb, stack, stack_sz);
+	if (rc < 0)
+	{
+		wrm_loge("app=%.4s:  no free threads, max=%u, rc=%d.\n", app->name_str(), app->max_threads(), rc);
+		return rc;
+	}
+	*thrno = rc;
+	return 0;
+}
+
+extern "C" int wrm_app_thr_state(L4_thrid_t id, unsigned thrno)
+{
+	App_t* app = apps.find(id);
+	if (!app)
+	{
+		wrm_loge("%s:  unknown app thread=%u.\n", __func__, id.number());
+		return -10;
+	}
+	return app->thread_state(thrno);
+}
+
+extern "C" int wrm_app_thr_terminate(L4_thrid_t id, unsigned thrno, long term_code)
+{
+	App_t* app = apps.find(id);
+	if (!app)
+	{
+		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
+		return -10;
+	}
+	return app->thread_terminate(thrno, term_code);
+}
+
+extern "C" int wrm_app_thr_free(L4_thrid_t id, unsigned thrno, L4_fpage_t* utcb, addr_t* stack,
+                                size_t* stack_sz, long* term_code)
+{
+	App_t* app = apps.find(id);
+	if (!app)
+	{
+		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
+		return -10;
+	}
+	return app->thread_free(thrno, utcb, stack, stack_sz, term_code);
+}
+
+extern "C" int wrm_app_thr_numbers(L4_thrid_t id, unsigned* thrno_begin, unsigned* thrno_end)
+{
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
 		return -1;
 	}
-
-	*thrno = app->alloc_thrno();
-	if (!*thrno)
-	{
-		wrm_loge("app=%.4s:  no free threads, max=%u.\n", app->name_str(), app->max_threads());
-		return -2;
-	}
-
-	return 0;
-}
-
-extern "C" int wrm_app_free_thrno(L4_thrid_t id, unsigned thrno)
-{
-	App_map_t* app = app_maps.find(id);
-	if (!app)
-	{
-		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
-		return -1;
-	}
-
-	bool ok = app->free_thrno(thrno);
-	if (!ok)
-	{
-		wrm_loge("app=%.4s:  could not free thrno, wrong thread number.\n", app->name_str());
-		return -2;
-	}
-
-	return 0;
-}
-
-extern "C" int wrm_app_get_thr_numbers(L4_thrid_t id, unsigned* thrno_begin, unsigned* thrno_end)
-{
-	App_map_t* app = app_maps.find(id);
-	if (!app)
-	{
-		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
-		return -1;
-	}
-
-	bool ok = app->get_thread_numbers(thrno_begin, thrno_end);
+	bool ok = app->thread_numbers(thrno_begin, thrno_end);
 	if (!ok)
 	{
 		wrm_loge("could not get thread numbers for app=%.4s.\n", app->name_str());
 		return -2;
 	}
-
 	return 0;
 }
 
 extern "C" int wrm_app_max_prio(L4_thrid_t id, unsigned* max_prio)
 {
-	App_map_t* app = app_maps.find(id);
+	App_t* app = apps.find(id);
 	if (!app)
 	{
 		wrm_loge("unknown app/thread 0x%lx/%u.\n", id.raw(), id.number());
